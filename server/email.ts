@@ -1,0 +1,38 @@
+/**
+ * Optional email sending over HTTPS (Railway's free plan blocks SMTP ports).
+ *
+ *   BREVO_API_KEY + SENDER_EMAIL (+ SENDER_NAME)  — brevo.com free plan, ~300 emails/day, no card.
+ *                                                    Verify SENDER_EMAIL as a sender in Brevo first.
+ *
+ * Without a key, the UI opens the email pre-filled in Gmail / your mail app instead
+ * (which is also the best option for deliverability on low-volume investor outreach).
+ */
+const env = (k: string) => (process.env[k] || '').trim();
+
+export function emailProvider(): string {
+  return env('BREVO_API_KEY') && env('SENDER_EMAIL') ? 'brevo' : 'none';
+}
+
+export async function sendEmail(to: string, subject: string, body: string, replyTo?: string): Promise<{ ok: boolean; id?: string; error?: string }> {
+  if (emailProvider() !== 'brevo') return { ok: false, error: 'No email provider configured (set BREVO_API_KEY and SENDER_EMAIL).' };
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { ok: false, error: 'Invalid recipient email' };
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'api-key': env('BREVO_API_KEY') },
+    body: JSON.stringify({
+      sender: { email: env('SENDER_EMAIL'), name: env('SENDER_NAME') || undefined },
+      to: [{ email: to }],
+      replyTo: replyTo ? { email: replyTo } : undefined,
+      subject,
+      textContent: body
+    }),
+    signal: AbortSignal.timeout(20000)
+  });
+  const txt = await res.text();
+  if (!res.ok) return { ok: false, error: `Brevo ${res.status}: ${txt.slice(0, 200)}` };
+  try {
+    return { ok: true, id: JSON.parse(txt).messageId };
+  } catch {
+    return { ok: true };
+  }
+}

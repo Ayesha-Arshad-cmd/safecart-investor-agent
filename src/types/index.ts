@@ -1,0 +1,194 @@
+// Shared types — used by both the React frontend (src/) and the Node backend (server/).
+
+export type OutreachStatus =
+  | 'discovered'
+  | 'researched'
+  | 'hot'
+  | 'warm'
+  | 'contacted'
+  | 'replied'
+  | 'meeting'
+  | 'diligence'
+  | 'passed';
+
+export type InvestmentStage = 'Pre-seed' | 'Seed' | 'Series A' | 'Growth' | 'All Stages' | 'Unknown';
+
+export type InvestorType = 'Angel' | 'VC Fund' | 'Micro-VC' | 'Family Office' | 'Angel Group' | 'Accelerator' | 'Corporate VC' | 'Other';
+
+export interface EmailSequenceStep {
+  stepNumber: number;
+  dayDelay: number;
+  stepName: string;
+  subject: string;
+  body: string;
+  rationale: string;
+  sentAt?: string;
+}
+
+export interface InvestorFitScore {
+  total: number; // 0 - 100
+  thesisMatch: number;
+  stageMatch: number;
+  sectorMatch: number;
+  checkSizeMatch: number;
+  synergyMatch: number;
+  status: 'hot' | 'warm' | 'cold';
+  verdict: string;
+  whyInvest: string[];
+  hesitations: string[];
+  keyTalkingPoint: string;
+}
+
+export interface ExtractedCrawlData {
+  rawUrl: string;
+  crawledAt: string;
+  pageTitle: string;
+  metaDescription: string;
+  extractedTextExcerpt: string;
+  keyQuotes: string[];
+  portfolioFound: string[];
+  detectedCheckSize: string;
+  detectedContactEmail: string;
+}
+
+export interface Investor {
+  id: string;
+  name: string;
+  title: string;
+  firm: string;
+  investorType?: InvestorType;
+  website: string;
+  email: string;
+  linkedin: string;
+  twitter?: string;
+  location: string;
+  stage: InvestmentStage;
+  checkSizeFormatted: string;
+  checkSizeMin: number;
+  checkSizeMax: number;
+  industries: string[];
+  portfolio: string[];
+  recentInvestments: { name: string; year: string; sector: string; note: string }[];
+  thesis: string;
+  antiPortfolio?: string[];
+  contactRoute: string;
+  activePartner: string;
+  fitScore: InvestorFitScore;
+  researchNotes: string;
+  extractedData: ExtractedCrawlData;
+  /** Public pages the agent used as evidence for this investor. */
+  sourceUrls?: string[];
+  /** Short LinkedIn connection-request note (<= 300 chars). */
+  linkedinNote?: string;
+  /** Longer LinkedIn DM to send after they accept. */
+  linkedinMessage?: string;
+  outreach: {
+    status: OutreachStatus;
+    sequenceGenerated: boolean;
+    sequences: EmailSequenceStep[];
+    lastContactedDate?: string;
+    nextFollowUpDate?: string;
+    responseNotes?: string;
+    replyDate?: string;
+    sentStepsCount: number;
+    linkedinRequestSentAt?: string;
+  };
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StartupProfile {
+  name: string;
+  website?: string;
+  oneLiner: string;
+  category: string;
+  stage: InvestmentStage;
+  targetRaise: string;
+  checkSizeMin: string;
+  checkSizeMax: string;
+  location: string;
+  tractionHighlights: string[];
+  problem: string;
+  secretSauce: string;
+  idealInvestorTraits: string;
+  keyFeatures?: string[];
+  founderName?: string;
+  founderEmail?: string;
+  /** Anything else the founder wants the agent to know (pasted text, notes, app-store copy...). */
+  extraContext?: string;
+
+  // ---- Phase 1: AI-generated product intelligence ----
+  productDescription?: string;
+  targetCustomers?: string[];
+  endUsers?: string[];
+  businessModel?: string;
+  marketDescription?: string;
+  competitors?: string[];
+  differentiation?: string[];
+  fundingUse?: string[];
+  investorKeywords?: string[];
+  investorTypesToTarget?: string[];
+  linkedinSearchQueries?: string[];
+  webSearchQueries?: string[];
+  risksInvestorsWillAsk?: string[];
+  aiConfidence?: number;
+  aiGeneratedAt?: string;
+}
+
+export interface PipelineExecutionLog {
+  id: string;
+  timestamp: string;
+  phase: 'product' | 'search' | 'extract' | 'research' | 'score' | 'outreach' | 'crm' | 'system';
+  message: string;
+  level: 'info' | 'success' | 'warn' | 'error';
+  investorName?: string;
+}
+
+export interface AppSettings {
+  leadsPerRun: number;
+  minFitScoreToKeep: number;
+  geographyFocus: string;
+  lookupLinkedInProfiles: boolean;
+  includeLocalAngelGroups: boolean;
+  senderName: string;
+  senderEmail: string;
+}
+
+/** A raw "possible investor" found by search, before deep research. */
+export interface DiscoveryCandidate {
+  id: string;
+  name: string;
+  firm: string;
+  title: string;
+  investorType: InvestorType;
+  linkedinUrl: string;
+  websiteUrl: string;
+  sourceUrl: string;
+  sourceTitle: string;
+  snippet: string;
+  whyRelevant: string;
+  location: string;
+  alreadyInCrm?: boolean;
+}
+
+export interface AgentJob {
+  id: string;
+  status: 'running' | 'done' | 'error' | 'cancelled';
+  startedAt: string;
+  finishedAt?: string;
+  progress: number;
+  logs: PipelineExecutionLog[];
+  investors: Investor[];
+  startupUpdate?: Partial<StartupProfile>;
+  error?: string;
+}
+
+export interface HealthInfo {
+  ok: boolean;
+  ai: { configured: boolean; providers: string[] };
+  search: { providers: string[] };
+  email: { configured: boolean; provider: string };
+  storage: { persistent: boolean; path: string };
+  passwordRequired: boolean;
+}

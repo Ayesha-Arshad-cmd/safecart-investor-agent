@@ -1,0 +1,257 @@
+import React, { useMemo, useState } from 'react';
+import { Search, ExternalLink, Sparkles, Plus, Loader2, CheckCircle2, Linkedin, Globe, Layers, XCircle } from 'lucide-react';
+import { Investor, StartupProfile, AppSettings, DiscoveryCandidate } from '../types';
+import { api } from '../services/api';
+
+interface DiscoveryTabProps {
+  startup: StartupProfile;
+  settings: AppSettings;
+  investors: Investor[];
+  onAddInvestor: (newInv: Investor) => void;
+  onOpenInvestorDetail: (inv: Investor) => void;
+  onOpenRunnerModal: () => void;
+  showToast: (msg: string, error?: boolean) => void;
+}
+
+type Mode = 'linkedin' | 'web' | 'both';
+
+export const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ startup, settings, investors, onAddInvestor, onOpenInvestorDetail, onOpenRunnerModal, showToast }) => {
+  const [mode, setMode] = useState<Mode>('linkedin');
+  const [query, setQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [candidates, setCandidates] = useState<DiscoveryCandidate[]>([]);
+  const [searchInfo, setSearchInfo] = useState<string>('');
+  const [processing, setProcessing] = useState<Record<string, 'busy' | 'done' | 'error'>>({});
+  const [bulkRunning, setBulkRunning] = useState(false);
+
+  const presets = useMemo(() => {
+    const li = (startup.linkedinSearchQueries || []).slice(0, 6).map(q => ({ q, mode: 'linkedin' as Mode }));
+    const web = (startup.webSearchQueries || []).slice(0, 6).map(q => ({ q, mode: 'web' as Mode }));
+    return [...li, ...web];
+  }, [startup.linkedinSearchQueries, startup.webSearchQueries]);
+
+  const runSearch = async (q?: string, m: Mode = mode) => {
+    setIsSearching(true);
+    setSearchInfo('');
+    try {
+      const res = await api.discover(startup, settings, investors, q ? { query: q, mode: m } : { mode: m });
+      const existing = new Set(investors.map(i => i.name.toLowerCase()));
+      setCandidates(res.candidates.map(c => ({ ...c, alreadyInCrm: existing.has(c.name.toLowerCase()) })));
+      const warn = res.logs.filter(l => /No results|failed/i.test(l));
+      setSearchInfo(
+        `Searched ${res.queries.length} quer${res.queries.length === 1 ? 'y' : 'ies'}, read ${res.resultsSearched} results → ${res.candidates.length} new investors.` +
+          (warn.length ? ` ⚠ ${warn[0]}` : '')
+      );
+    } catch (e: any) {
+      showToast(e?.message || 'Search failed', true);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const research = async (c: DiscoveryCandidate) => {
+    setProcessing(p => ({ ...p, [c.id]: 'busy' }));
+    try {
+      const { investor } = await api.research(startup, c, settings);
+      onAddInvestor(investor);
+      setProcessing(p => ({ ...p, [c.id]: 'done' }));
+      setCandidates(prev => prev.map(x => (x.id === c.id ? { ...x, alreadyInCrm: true } : x)));
+      return true;
+    } catch (e: any) {
+      setProcessing(p => ({ ...p, [c.id]: 'error' }));
+      showToast(`${c.name}: ${e?.message || 'research failed'}`, true);
+      return false;
+    }
+  };
+
+  const researchAll = async () => {
+    setBulkRunning(true);
+    for (const c of candidates.filter(c => !c.alreadyInCrm && processing[c.id] !== 'done')) {
+      await research(c);
+    }
+    setBulkRunning(false);
+  };
+
+  const pending = candidates.filter(c => !c.alreadyInCrm).length;
+
+  return (
+    <div className="space-y-6">
+      <div className="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-950 text-cyan-400 border border-cyan-800">PHASE 2-3</span>
+            <h2 className="text-base font-semibold text-white tracking-tight">Find investors on LinkedIn & the web</h2>
+          </div>
+          <p className="text-xs text-zinc-400 mt-1 max-w-2xl leading-relaxed">
+            The agent searches public LinkedIn profiles and investor websites, then AI picks out real investors who fit {startup.name}. Click{' '}
+            <b>Research & add</b> to read their site, find their LinkedIn, score them and draft outreach. (It never logs in to LinkedIn — no ban risk.)
+          </p>
+        </div>
+        <button
+          onClick={onOpenRunnerModal}
+          className="flex items-center gap-2 px-3.5 py-2 bg-emerald-400 hover:bg-emerald-300 text-emerald-950 text-xs font-semibold rounded-lg cursor-pointer shrink-0"
+        >
+          <Sparkles className="w-3.5 h-3.5" /> Let the agent do everything
+        </button>
+      </div>
+
+      <div className="flex gap-1 p-1 bg-zinc-900 border border-zinc-800 rounded-lg w-fit text-xs">
+        {(
+          [
+            ['linkedin', <Linkedin key="l" className="w-3.5 h-3.5" />, 'LinkedIn profiles'],
+            ['web', <Globe key="w" className="w-3.5 h-3.5" />, 'Funds & angel groups'],
+            ['both', <Layers key="b" className="w-3.5 h-3.5" />, 'Both']
+          ] as const
+        ).map(([id, icon, text]) => (
+          <button
+            key={id}
+            onClick={() => setMode(id)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded cursor-pointer ${mode === id ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}
+          >
+            {icon}
+            {text}
+          </button>
+        ))}
+      </div>
+
+      {presets.length > 0 && (
+        <div>
+          <span className="text-[11px] uppercase font-semibold text-zinc-500 tracking-wider block mb-2">
+            Agent's search plan for {startup.name} (click to run):
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {presets.map((p, idx) => (
+              <button
+                key={idx}
+                onClick={() => {
+                  setMode(p.mode);
+                  setQuery(p.q);
+                  runSearch(p.q, p.mode);
+                }}
+                className="px-2.5 py-1.5 rounded text-[11px] border bg-zinc-950 text-zinc-400 border-zinc-800/80 hover:bg-zinc-900 hover:text-zinc-200 cursor-pointer text-left flex items-center gap-1"
+              >
+                {p.mode === 'linkedin' ? <Linkedin className="w-3 h-3 text-sky-400" /> : <Globe className="w-3 h-3 text-cyan-400" />}
+                <span className="font-mono">{p.q.replace(/^site:linkedin\.com\/in\s*/i, '')}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <form
+        onSubmit={e => {
+          e.preventDefault();
+          runSearch(query.trim() || undefined);
+        }}
+        className="flex flex-col sm:flex-row gap-2"
+      >
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-3" />
+          <input
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder={
+              mode === 'linkedin'
+                ? '"angel investor" "edtech" Arizona   (leave empty to run the whole plan)'
+                : 'investors in kids fintech startups   (leave empty to run the whole plan)'
+            }
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={isSearching}
+          className="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+        >
+          {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+          {isSearching ? 'Searching & reading…' : 'Search'}
+        </button>
+      </form>
+
+      <div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 text-xs">
+          <span className="text-zinc-400">{searchInfo || 'Run a search to discover investors. Searches take 10-60 seconds because the AI reads every result.'}</span>
+          {pending > 0 && (
+            <button
+              onClick={researchAll}
+              disabled={bulkRunning}
+              className="px-3 py-1.5 rounded bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-semibold text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              {bulkRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+              Research & add all {pending}
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {candidates.map(item => {
+            const state = processing[item.id];
+            const inCrm = investors.find(i => i.name.toLowerCase() === item.name.toLowerCase());
+            return (
+              <div key={item.id} className="bg-zinc-900/40 border border-zinc-800 hover:border-zinc-700/80 rounded-lg p-4 flex flex-col justify-between space-y-3">
+                <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold text-white tracking-tight">{item.name}</h3>
+                      <div className="text-xs text-zinc-400 font-medium truncate">
+                        {item.title ? `${item.title} · ` : ''}
+                        {item.firm}
+                        {item.location ? <span className="text-zinc-500"> · {item.location}</span> : null}
+                      </div>
+                    </div>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-800 text-zinc-300 shrink-0">{item.investorType}</span>
+                  </div>
+                  {item.whyRelevant && <p className="text-xs text-emerald-200/90 mt-2 leading-relaxed">{item.whyRelevant}</p>}
+                  {item.snippet && <p className="text-[11px] text-zinc-500 mt-1.5 line-clamp-2 leading-relaxed">“{item.snippet}”</p>}
+                </div>
+
+                <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {item.linkedinUrl && (
+                      <a href={item.linkedinUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-sky-400 hover:underline text-[11px]">
+                        <Linkedin className="w-3 h-3" /> Profile
+                      </a>
+                    )}
+                    <a href={item.sourceUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-cyan-400 hover:underline text-[11px] truncate">
+                      Source <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  </div>
+
+                  {item.alreadyInCrm || state === 'done' ? (
+                    <button
+                      onClick={() => inCrm && onOpenInvestorDetail(inCrm)}
+                      className="flex items-center gap-1 text-emerald-400 text-[11px] font-medium cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> In CRM
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => research(item)}
+                      disabled={state === 'busy'}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded font-medium text-[11px] cursor-pointer disabled:opacity-50 shrink-0"
+                    >
+                      {state === 'busy' ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" /> Researching…
+                        </>
+                      ) : state === 'error' ? (
+                        <>
+                          <XCircle className="w-3 h-3 text-red-400" /> Retry
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3 h-3" /> Research & add
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
