@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Play, Loader2, Terminal, Brain, Search, Cpu, Mail, Database, Square, Sparkles } from 'lucide-react';
-import { Investor, StartupProfile, AppSettings, AgentJob, PipelineExecutionLog } from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, Play, Pause, Loader2, Terminal, Sparkles, RotateCw } from 'lucide-react';
+import { Investor, StartupProfile, AppSettings, Campaign } from '../types';
 import { api } from '../services/api';
 
 interface Props {
@@ -9,241 +9,290 @@ interface Props {
   startup: StartupProfile;
   settings: AppSettings;
   existingInvestors: Investor[];
-  onAddOrUpdateInvestor: (investor: Investor) => void;
+  onRefresh: () => void;
   onStartupIntel: (intel: Partial<StartupProfile>) => void;
   onCompletePipeline?: (newCount: number) => void;
 }
 
-const PHASES: { id: PipelineExecutionLog['phase'][]; label: string; icon: React.ReactNode; color: string }[] = [
-  { id: ['product'], label: '1. Understand app', icon: <Brain className="w-3.5 h-3.5 mx-auto mb-1" />, color: 'pink' },
-  { id: ['search', 'extract'], label: '2. Search web + LinkedIn', icon: <Search className="w-3.5 h-3.5 mx-auto mb-1" />, color: 'cyan' },
-  { id: ['research'], label: '3. Research', icon: <Terminal className="w-3.5 h-3.5 mx-auto mb-1" />, color: 'indigo' },
-  { id: ['score'], label: '4. Score fit', icon: <Cpu className="w-3.5 h-3.5 mx-auto mb-1" />, color: 'amber' },
-  { id: ['outreach', 'crm'], label: '5. Outreach + CRM', icon: <Mail className="w-3.5 h-3.5 mx-auto mb-1" />, color: 'purple' }
-];
-
 const phaseClass: Record<string, string> = {
-  product: 'bg-pink-950 text-pink-400',
-  search: 'bg-cyan-950 text-cyan-400',
-  extract: 'bg-cyan-950 text-cyan-300',
-  research: 'bg-indigo-950 text-indigo-400',
-  score: 'bg-amber-950 text-amber-400',
-  outreach: 'bg-purple-950 text-purple-400',
-  crm: 'bg-emerald-950 text-emerald-400',
-  system: 'bg-zinc-800 text-zinc-300'
+  product: 'bg-pink-50 text-pink-700',
+  search: 'bg-cyan-50 text-cyan-700',
+  extract: 'bg-cyan-50 text-cyan-700',
+  research: 'bg-indigo-50 text-indigo-700',
+  score: 'bg-amber-50 text-amber-700',
+  outreach: 'bg-purple-50 text-purple-700',
+  crm: 'bg-emerald-50 text-emerald-700',
+  system: 'bg-slate-100 text-slate-700'
 };
 
-export const AutonomousRunnerModal: React.FC<Props> = ({
-  isOpen,
-  onClose,
-  startup,
-  settings,
-  existingInvestors,
-  onAddOrUpdateInvestor,
-  onStartupIntel,
-  onCompletePipeline
-}) => {
-  const [job, setJob] = useState<AgentJob | null>(null);
-  const [starting, setStarting] = useState(false);
+const PHASE_LABEL: Record<Campaign['phase'], string> = {
+  queries: 'Planning searches',
+  search: 'Searching the web & LinkedIn',
+  extract: 'Picking out investors',
+  quick: 'Quick-scoring',
+  deep: 'Deep research on the best ones',
+  done: 'Finished'
+};
+
+function progressOf(c: Campaign): number {
+  const k = c.counts || { found: 0, quick: 0, researched: 0, skipped: 0, failed: 0 };
+  if (c.status === 'done') return 100;
+  if (c.phase === 'queries') return 2;
+  if (c.phase === 'search' || c.phase === 'extract') return Math.min(35, Math.round((k.found / Math.max(1, c.target * 1.3)) * 35));
+  if (c.phase === 'quick') {
+    const scored = k.quick + k.skipped + k.failed;
+    return 35 + Math.round((scored / Math.max(1, k.found)) * 25);
+  }
+  if (c.phase === 'deep') return 60 + Math.min(39, Math.round((k.researched / Math.max(1, Math.min(k.quick, 40))) * 39));
+  return 99;
+}
+
+export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startup, settings, existingInvestors, onRefresh, onStartupIntel, onCompletePipeline }) => {
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [target, setTarget] = useState(settings.leadsPerRun || 100);
+  const [mode, setMode] = useState<'deep' | 'quick'>('deep');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [refreshProduct, setRefreshProduct] = useState(false);
-  const [leads, setLeads] = useState(settings.leadsPerRun);
-  const added = useRef<Set<string>>(new Set());
-  const intelApplied = useRef<string>('');
-  const finishedReported = useRef<string>('');
+  const [showForm, setShowForm] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
-  const callbacks = useRef({ onAddOrUpdateInvestor, onStartupIntel, onCompletePipeline });
-  callbacks.current = { onAddOrUpdateInvestor, onStartupIntel, onCompletePipeline };
+  const reported = useRef<string>('');
+  const cb = useRef({ onRefresh, onCompletePipeline });
+  cb.current = { onRefresh, onCompletePipeline };
 
-  useEffect(() => setLeads(settings.leadsPerRun), [settings.leadsPerRun]);
+  useEffect(() => setTarget(settings.leadsPerRun || 100), [settings.leadsPerRun]);
 
-  // on open: re-attach to a running job (e.g. after a page refresh)
+  // load current run when opened
   useEffect(() => {
-    if (!isOpen || job) return;
+    if (!isOpen) return;
     api
-      .latestJob()
+      .getCampaign()
       .then(r => {
-        // merging is idempotent (same name+firm replaces), so re-adding is safe
-        if (r.job && r.job.status === 'running') setJob(r.job);
+        setCampaign(r.campaign);
+        if (r.campaign?.status === 'done') reported.current = r.campaign.id;
+        setShowForm(!r.campaign || r.campaign.status === 'done' || r.campaign.status === 'error');
       })
-      .catch(() => {});
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+      .catch(() => setShowForm(true));
+  }, [isOpen]);
 
-  // poll while running
+  // poll while running (even if the window is closed, the run continues on the server)
   useEffect(() => {
-    if (!job || job.status !== 'running') return;
+    if (!isOpen || !campaign || campaign.status !== 'running') return;
+    let n = 0;
     const t = window.setInterval(async () => {
       try {
-        const { job: j } = await api.getJob(job.id);
-        setJob(j);
-      } catch (e: any) {
-        setError(e?.message || 'Lost connection to the job');
-        setJob(prev => (prev ? { ...prev, status: 'error' } : prev));
+        const { campaign: c } = await api.getCampaign();
+        setCampaign(c);
+        if (++n % 4 === 0) cb.current.onRefresh();
+      } catch {
+        /* ignore */
       }
-    }, 2000);
+    }, 3000);
     return () => window.clearInterval(t);
-  }, [job?.id, job?.status]);
+  }, [isOpen, campaign?.id, campaign?.status]);
 
-  // merge results into the CRM as they arrive
   useEffect(() => {
-    if (!job) return;
-    if (job.startupUpdate && intelApplied.current !== job.id) {
-      intelApplied.current = job.id;
-      callbacks.current.onStartupIntel(job.startupUpdate);
+    if (!campaign) return;
+    if (campaign.status === 'done' && reported.current !== campaign.id) {
+      reported.current = campaign.id;
+      cb.current.onRefresh();
+      const k = campaign.counts;
+      cb.current.onCompletePipeline?.(k ? k.quick : 0);
     }
-    for (const inv of job.investors) {
-      if (!added.current.has(inv.id)) {
-        added.current.add(inv.id);
-        callbacks.current.onAddOrUpdateInvestor(inv);
-      }
-    }
-    if (job.status !== 'running' && finishedReported.current !== job.id) {
-      finishedReported.current = job.id;
-      if (job.status === 'done') callbacks.current.onCompletePipeline?.(job.investors.length);
-    }
-  }, [job]);
+  }, [campaign]);
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [job?.logs.length]);
+  }, [campaign?.logs.length]);
 
   if (!isOpen) return null;
 
-  const running = job?.status === 'running';
-  const lastPhase = job?.logs.length ? job.logs[job.logs.length - 1].phase : null;
-
   const start = async () => {
     setError('');
-    setStarting(true);
+    setBusy(true);
     try {
-      const { jobId } = await api.runAgent(startup, { ...settings, leadsPerRun: leads }, existingInvestors, refreshProduct);
-      const { job: j } = await api.getJob(jobId);
-      setJob(j);
+      let s = startup;
+      if (!s.investorKeywords?.length) {
+        const { intel } = await api.analyzeProduct(s, settings);
+        s = { ...s, ...intel };
+        onStartupIntel(intel);
+      }
+      const { campaign: c } = await api.startCampaign(s, { ...settings, leadsPerRun: target }, target, mode);
+      setCampaign(c);
+      setShowForm(false);
     } catch (e: any) {
-      setError(e?.message || 'Could not start the agent');
+      setError(e?.message || 'Could not start the run');
     } finally {
-      setStarting(false);
+      setBusy(false);
     }
   };
 
-  const stop = async () => {
-    if (job) await api.cancelJob(job.id).catch(() => {});
+  const pause = async () => {
+    const r = await api.pauseCampaign().catch(() => null);
+    if (r) setCampaign(r.campaign);
+  };
+  const resume = async () => {
+    const r = await api.resumeCampaign().catch(() => null);
+    if (r) setCampaign(r.campaign);
   };
 
+  const running = campaign?.status === 'running';
+  const k = campaign?.counts || { found: 0, quick: 0, researched: 0, skipped: 0, failed: 0 };
+  const pct = campaign ? progressOf(campaign) : 0;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-zinc-950 border border-zinc-800 rounded-xl max-w-3xl w-full p-5 sm:p-6 text-zinc-200 shadow-2xl my-8">
-        <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/30 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full p-5 sm:p-6 text-slate-700 shadow-2xl my-8">
+        <div className="flex items-center justify-between border-b border-slate-200 pb-4">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+            <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700">
               <Sparkles className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-base font-semibold text-white">Run the investor agent for {startup.name}</h2>
-              <p className="text-xs text-zinc-400">Understand app → search web & LinkedIn → research → score → write outreach → save to CRM</p>
-            </div>
+            <h2 className="text-base font-semibold text-slate-900">Find investors for {startup.name}</h2>
           </div>
-          <button onClick={onClose} className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-900 cursor-pointer" title="Close (the agent keeps running on the server)">
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1 rounded-md hover:bg-slate-100 cursor-pointer" title="Close (the run keeps going)">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="my-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs items-end">
-          <div>
-            <label className="block text-zinc-400 mb-1">Investors to research this run</label>
-            <input
-              type="number"
-              min={1}
-              max={30}
-              value={leads}
-              disabled={running}
-              onChange={e => setLeads(Math.max(1, Math.min(30, Number(e.target.value) || 1)))}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
-            />
-          </div>
-          <label className="flex items-center gap-2 text-zinc-300 cursor-pointer select-none sm:pb-2">
-            <input type="checkbox" checked={refreshProduct} disabled={running} onChange={e => setRefreshProduct(e.target.checked)} />
-            Re-analyse the app first
-          </label>
-          {running ? (
-            <button onClick={stop} className="px-4 py-2 font-semibold text-red-200 bg-red-900/70 hover:bg-red-800 rounded flex items-center justify-center gap-1.5 cursor-pointer">
-              <Square className="w-3.5 h-3.5 fill-current" /> Stop
-            </button>
-          ) : (
-            <button
-              onClick={start}
-              disabled={starting}
-              className="px-4 py-2 font-semibold text-emerald-950 bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 rounded flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              {starting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
-              {job ? 'Run again' : 'Start agent'}
-            </button>
-          )}
-        </div>
-
-        <div className="grid grid-cols-5 gap-1.5 my-4 text-center">
-          {PHASES.map(p => {
-            const active = running && lastPhase && p.id.includes(lastPhase);
-            return (
-              <div
-                key={p.label}
-                className={`p-2 rounded border text-[10px] sm:text-[11px] font-mono transition-colors ${
-                  active ? 'bg-emerald-950/60 border-emerald-500 text-emerald-300' : 'bg-zinc-900/50 border-zinc-800 text-zinc-500'
-                }`}
-              >
-                {p.icon}
-                <span>{p.label}</span>
+        {showForm ? (
+          <div className="my-5 space-y-4 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">How many investors this run?</label>
+                <input
+                  type="number"
+                  min={10}
+                  max={300}
+                  value={target}
+                  onChange={e => setTarget(Math.max(10, Math.min(300, Number(e.target.value) || 10)))}
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-500"
+                />
+                <div className="flex gap-1 mt-1.5">
+                  {[50, 100, 150, 200].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setTarget(n)}
+                      className={`px-2 py-0.5 rounded text-xs border cursor-pointer ${target === n ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
               </div>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
-          <span className="font-mono flex items-center gap-1.5">
-            <Terminal className="w-3.5 h-3.5 text-emerald-400" /> Live agent log
-          </span>
-          <span className="font-mono text-[11px]">
-            {job ? `${job.progress}% · ${job.investors.length} saved · ${job.status}` : 'idle'}
-          </span>
-        </div>
-        <div className="w-full bg-zinc-900 rounded-full h-1.5 overflow-hidden mb-2">
-          <div className="bg-emerald-400 h-1.5 transition-all duration-500" style={{ width: `${job?.progress || 0}%` }} />
-        </div>
-
-        <div ref={logRef} className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 font-mono text-[11px] h-72 overflow-y-auto space-y-1.5">
-          {!job ? (
-            <div className="h-full flex flex-col items-center justify-center text-zinc-600 text-center px-6">
-              <Play className="w-6 h-6 mb-2 opacity-40" />
-              <p>Click "Start agent". A run of 10 investors usually takes 3-8 minutes on free AI tiers. You can close this window — it keeps running on the server.</p>
+              <div className="space-y-2">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="radio" className="mt-1" checked={mode === 'deep'} onChange={() => setMode('deep')} />
+                  <span>
+                    <span className="font-medium text-slate-900">Quick scan + deep research</span>
+                    <span className="block text-xs text-slate-500">
+                      Best {settings.deepResearchPerRun ?? 40} (score {settings.deepResearchMinScore ?? 50}+) get full research and emails.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="radio" className="mt-1" checked={mode === 'quick'} onChange={() => setMode('quick')} />
+                  <span>
+                    <span className="font-medium text-slate-900">Quick scan only</span>
+                    <span className="block text-xs text-slate-500">Fastest. Research any of them later from their profile.</span>
+                  </span>
+                </label>
+              </div>
             </div>
-          ) : (
-            job.logs.map(log => (
-              <div key={log.id} className="flex items-start gap-2 leading-tight">
-                <span className="text-zinc-600 shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                <span className={`px-1 rounded text-[10px] uppercase font-bold shrink-0 ${phaseClass[log.phase] || phaseClass.system}`}>{log.phase}</span>
-                {log.investorName && <span className="text-zinc-300 font-semibold shrink-0">[{log.investorName}]</span>}
-                <span
-                  className={
-                    log.level === 'success' ? 'text-emerald-300' : log.level === 'warn' ? 'text-amber-300' : log.level === 'error' ? 'text-red-400' : 'text-zinc-300'
-                  }
-                >
-                  {log.message}
+            <p className="text-xs text-slate-500">
+              Each run skips investors already in your list and searches already used, so the next run finds new people. You have {existingInvestors.length} so far.
+            </p>
+            <div className="flex justify-end gap-2">
+              {campaign && campaign.status !== 'done' && (
+                <button onClick={() => setShowForm(false)} className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 cursor-pointer">
+                  Back to current run
+                </button>
+              )}
+              <button
+                onClick={start}
+                disabled={busy}
+                className="px-5 py-2 font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg flex items-center gap-1.5 cursor-pointer"
+              >
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+                Start
+              </button>
+            </div>
+          </div>
+        ) : campaign ? (
+          <div className="my-5 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+              {[
+                ['Found', k.found],
+                ['Added to list', k.quick],
+                ['Deep researched', k.researched],
+                ['Skipped (weak)', k.skipped]
+              ].map(([l, v]) => (
+                <div key={l as string} className="rounded-lg border border-slate-200 p-2.5">
+                  <div className="text-xl font-semibold text-slate-900">{v as number}</div>
+                  <div className="text-xs text-slate-500">{l}</div>
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                <span>
+                  {campaign.status === 'paused' ? 'Paused' : campaign.status === 'error' ? 'Stopped' : PHASE_LABEL[campaign.phase]} · target {campaign.target}
                 </span>
+                <span>{pct}%</span>
               </div>
-            ))
-          )}
-        </div>
+              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                <div className="bg-emerald-500 h-2 transition-all duration-500" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
 
-        {error && <div className="mt-3 p-2 rounded bg-red-950/50 border border-red-900 text-red-200 text-xs">{error}</div>}
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <Terminal className="w-3.5 h-3.5" /> Progress log
+            </div>
+            <div ref={logRef} className="bg-white border border-slate-200 rounded-lg p-3 font-mono text-[11px] h-64 overflow-y-auto space-y-1.5">
+              {campaign.logs.map(log => (
+                <div key={log.id} className="flex items-start gap-2 leading-tight">
+                  <span className="text-slate-400 shrink-0">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                  <span className={`px-1 rounded text-[10px] uppercase font-bold shrink-0 ${phaseClass[log.phase] || phaseClass.system}`}>{log.phase}</span>
+                  {log.investorName && <span className="text-slate-700 font-semibold shrink-0">[{log.investorName}]</span>}
+                  <span
+                    className={
+                      log.level === 'success' ? 'text-emerald-700' : log.level === 'warn' ? 'text-amber-700' : log.level === 'error' ? 'text-red-600' : 'text-slate-700'
+                    }
+                  >
+                    {log.message}
+                  </span>
+                </div>
+              ))}
+            </div>
 
-        <div className="flex items-center justify-between pt-4 mt-4 border-t border-zinc-800 text-xs">
-          <span className="text-zinc-500 flex items-center gap-1">
-            <Database className="w-3.5 h-3.5" /> New investors are saved to your CRM as soon as each one is finished.
-          </span>
-          <button onClick={onClose} className="px-4 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-white cursor-pointer">
-            {job?.status === 'done' ? 'View CRM' : 'Close'}
-          </button>
-        </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs text-slate-500">You can close this window — the run keeps going on the server.</span>
+              <div className="flex gap-2">
+                {running && (
+                  <button onClick={pause} className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 flex items-center gap-1.5 text-sm cursor-pointer">
+                    <Pause className="w-4 h-4" /> Pause
+                  </button>
+                )}
+                {(campaign.status === 'paused' || campaign.status === 'error') && (
+                  <button onClick={resume} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 text-sm cursor-pointer">
+                    <Play className="w-4 h-4 fill-current" /> Resume
+                  </button>
+                )}
+                {!running && (
+                  <button onClick={() => setShowForm(true)} className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 flex items-center gap-1.5 text-sm cursor-pointer">
+                    <RotateCw className="w-4 h-4" /> Start next run
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="my-10 text-center text-slate-500 text-sm">
+            <Loader2 className="w-5 h-5 animate-spin inline" />
+          </div>
+        )}
+
+        {error && <div className="mt-2 p-2 rounded bg-red-50 border border-red-200 text-red-800 text-xs">{error}</div>}
       </div>
     </div>
   );

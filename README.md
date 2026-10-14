@@ -57,15 +57,35 @@ The build and start commands are already set in `railway.json` (`npm run build` 
 
 ## Using it
 
-1. **Tab 1 · SafeCart Kids Brain:** check the facts, add the raise amount, real traction and the founder's name, then click **Analyse with AI**.
-2. Click **Run Agent**, choose how many investors to research (start with 5-10), and click **Start agent**. A run takes a few minutes. You can close the window and it keeps running.
-3. **Tab 3 · AI Scoring:** see why each investor fits or doesn't.
-4. **Tab 4 · CRM Pipeline:** table or kanban view, with statuses, follow-up dates and CSV export.
-5. **Tab 5 · Outreach & Follow-ups:**
-   - **LinkedIn:** click *Open profile* (or *Find on LinkedIn*), then *Copy note*, paste it into LinkedIn's "Add a note", and click *Mark request sent*.
-   - **Email:** use *Open in Gmail* to send from your own account, then click *Mark as sent*. The next follow-up date is scheduled automatically.
-   - When someone answers, click **They replied** to stop their cadence.
-   - The **Due** filter shows whose follow-up is due today.
+1. **Your App tab:** check the facts, add the raise amount, real traction and the founder's name, then click **Analyse with AI**.
+2. Click **Find investors**, pick how many (50 / 100 / 150 / 200) and click **Start**.
+   - The agent quick-scans everyone it finds and adds them to your list straight away.
+   - It then deep-researches the best ones (score 50+, up to 40 per run — change this in Settings → Deep research).
+   - You can close the window: the run keeps going on the server, survives restarts, and has **Pause / Resume**.
+   - Click **Start next run** any time: it never repeats a search it already did, so you get *new* investors.
+   - People marked **Quick scan** can be upgraded any time with **Research deeply**.
+3. **Scores tab:** see why each investor fits or doesn't.
+4. **Investors tab:** table or board view, statuses, follow-up dates and CSV export.
+5. **Outreach tab:**
+   - **Automatic email** (after the Gmail setup below): every deep-researched investor at or above your score gets email 1, then follow-ups on day 4 / 10 / 21, inside your daily limit. When they reply, their follow-ups stop by themselves. Pause any single investor with one click.
+   - **LinkedIn today:** your daily list of connection requests. Click *Open profile* (the note is copied for you), paste it into "Add a note", then *Mark request sent*.
+   - **Accepted:** when LinkedIn emails you "… accepted your invitation", the agent spots it and puts that investor here. Click *Open profile & copy message*, paste, send, *Mark messaged*.
+
+## Automatic email (Gmail script, $0, about 10 minutes)
+
+Railway's free plan blocks normal email, so a tiny free script inside your own Google account does the sending. Emails go out from your real Gmail and show in your Sent folder.
+
+1. Sign in to the Gmail account you want to send from. Open **https://script.google.com** → **New project**.
+2. Delete what's there, paste the whole of `google-apps-script/Code.gs`.
+3. At the top, change `CHANGE-ME-to-a-long-random-password` to your own long password. Click **Save**.
+4. **Deploy → New deployment →** gear icon → **Web app**. *Execute as:* **Me**. *Who has access:* **Anyone**. Click **Deploy**.
+5. Click **Authorize access**, pick your account → *Advanced* → *Go to project (unsafe)* → **Allow**. (It says "unsafe" only because you wrote the script yourself and Google hasn't reviewed it.)
+6. Copy the **Web app URL** (ends with `/exec`).
+7. In Railway → your service → **Variables**, add `GMAIL_SCRIPT_URL` = that URL and `GMAIL_SCRIPT_SECRET` = your password from step 3. Railway redeploys.
+8. In the app: **Settings → Automatic email** → tick it, set your minimum score (50), emails per day, and your **company postal address** (the law requires it in cold emails). Save.
+9. LinkedIn: in LinkedIn → Settings → Notifications, keep **email** notifications on for "Invitation accepted", so the agent can see who accepted.
+
+If you change the script later, use **Deploy → Manage deployments → Edit → New version** so the URL stays the same.
 
 ### About LinkedIn
 
@@ -82,7 +102,10 @@ LinkedIn has no free API for searching people, and logging in with bots gets acc
 ## Free-tier limits (so nothing surprises you)
 
 - **Gemini free tier:** limited requests per minute and per day. The agent automatically falls back to Groq (and OpenRouter or Hugging Face if you add those keys). On Google's free tier, prompts may be used to improve Google's products, so don't paste confidential data into the "Anything else" box.
-- **Tavily:** 1,000 credits a month. One run of 10 investors uses roughly 30-40 searches.
+- **Serper:** 2,500 free searches (one time). A 100-investor run uses about 25-40 searches. Tavily: 1,000/month.
+- **Groq free:** about 1,000 AI requests a day. A 100-investor run uses about 60-90 (quick scans are 10 per request; each deep research is 1-2). If a limit is hit, the run waits and carries on.
+- **Gmail:** about 100 emails a day on a normal Gmail (1,500 on Google Workspace). Start with 20-25 a day so your address stays trusted.
+- **LinkedIn (free account):** about 100 connection requests a week, and only a few personalised notes a month. Keep "LinkedIn requests per day" around 15-20. The app never logs in to LinkedIn for you — automation tools that do get accounts restricted.
 - **Railway Free plan:** small CPU and RAM, which is plenty for this app. Railway blocks SMTP on free plans, so email sending uses Brevo's HTTPS API or your own Gmail.
 
 ## Later: other apps
@@ -99,7 +122,11 @@ server/            Node backend, zero runtime dependencies
   reader.ts        Website reader (+ free Jina Reader fallback)
   agent.ts         The agent: analyse → discover → research → score → outreach
   store.ts         JSON-file CRM database (DATA_DIR)
-  email.ts         Optional Brevo sending
+  email.ts         Sends through the Gmail helper (or Brevo as a backup)
+  gmail.ts         Talks to the Gmail helper script
+  campaign.ts      Big runs (100-200 investors), resumable, never repeats searches
+  automation.ts    Auto-email + follow-ups + reply / LinkedIn-accepted detection
+google-apps-script/Code.gs   The free Gmail helper you paste into script.google.com
 src/               React frontend (your original UI, now wired to the real backend)
 ```
 

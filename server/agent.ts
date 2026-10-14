@@ -219,7 +219,7 @@ export async function extractCandidates(
   const listPages: PageContent[] = [];
   for (const r of results.filter(looksLikeList).slice(0, maxListPages)) {
     const p = await readPage(r.url, 7000);
-    if (p.text.length > 500) {
+    if (p.text.length > 500 && !/just a moment|attention required|access denied|verify you are human/i.test(p.title)) {
       listPages.push(p);
       log('extract', `Read investor list page: ${p.title || r.title}`, 'info');
     }
@@ -241,19 +241,24 @@ export async function extractCandidates(
   let cur: typeof evidenceBlocks = [];
   let size = 0;
   for (const b of evidenceBlocks) {
-    const len = Math.min(b.text.length, 7000);
-    if (size + len > 14000 && cur.length) {
+    const len = Math.min(b.text.length, 5000);
+    if (size + len > 9000 && cur.length) {
       batches.push(cur);
       cur = [];
       size = 0;
     }
-    cur.push({ ...b, text: b.text.slice(0, 7000) });
+    cur.push({ ...b, text: b.text.slice(0, 5000) });
     size += len;
   }
   if (cur.length) batches.push(cur);
 
   for (const batch of batches) {
     let parsed: any;
+    for (let tryNo = 0; tryNo < 2 && parsed === undefined; tryNo++) {
+    if (tryNo > 0) {
+      log('extract', 'AI busy — waiting, then retrying this batch of search results…', 'info');
+      await new Promise(r => setTimeout(r, Number(process.env.AGENT_RETRY_WAIT_MS || 60000)));
+    }
     try {
       parsed = await chatJson<any>(
         `You extract REAL, specific investors from search results for a startup's fundraising. ${HONESTY_RULES}
@@ -277,9 +282,10 @@ Return JSON: {"investors":[{
         3500
       );
     } catch (e: any) {
-      log('extract', `AI extraction failed for one batch: ${e?.message?.slice(0, 160)}`, 'warn');
-      continue;
+      if (tryNo === 1) log('extract', `AI extraction failed for one batch: ${e?.message?.slice(0, 160)}`, 'warn');
     }
+    }
+    if (parsed === undefined) continue;
     for (const c of Array.isArray(parsed?.investors) ? parsed.investors : []) {
       const name = str(c.name, 120);
       if (!name || name.length < 3) continue;
@@ -419,7 +425,8 @@ export async function researchCandidate(
 
   // 2. Website
   let website = c.websiteUrl;
-  const look = await findFirmWebsite(c.firm, c.name).catch(() => ({ url: '', snippets: [] as SearchResult[] }));
+  // Only spend a search credit on finding the website when we don't already have it.
+  const look = website ? { url: '', snippets: [] as SearchResult[] } : await findFirmWebsite(c.firm, c.name).catch(() => ({ url: '', snippets: [] as SearchResult[] }));
   if (!website) website = look.url;
   for (const r of look.snippets.slice(0, 6)) {
     evidence.push(`SEARCH (${r.url}): ${r.title} — ${r.snippet}`);
@@ -448,7 +455,7 @@ export async function researchCandidate(
     }
   }
 
-  const evidenceText = evidence.join('\n\n---\n\n').slice(0, 16000);
+  const evidenceText = evidence.join('\n\n---\n\n').slice(0, 9000);
   const emailList = [...emails];
 
   const out = await chatJson<any>(
@@ -483,7 +490,7 @@ Return JSON:
  ${OUTREACH_SPEC(s, settings)}
 }
 Scoring guide: 80+ = clear thesis + stage match for a kids/family consumer app; 55-79 = adjacent (consumer, edtech, fintech generalist); <55 = weak/unclear. Be strict when evidence is thin.`,
-    5000
+    3500
   );
 
   const p = out?.profile || {};
@@ -557,6 +564,7 @@ Scoring guide: 80+ = clear thesis + stage match for a kids/family consumer app; 
       sentStepsCount: 0
     },
     tags: ['AI researched', c.investorType, linkedin ? 'LinkedIn found' : ''].filter(Boolean) as string[],
+    researchDepth: 'deep',
     createdAt: now,
     updatedAt: now
   };
@@ -668,10 +676,10 @@ export function startAgentJob(
       const target = candidates.slice(0, Math.max(1, settings.leadsPerRun || 10));
       log('research', `Phase 3-5 — researching, scoring and writing outreach for ${target.length} investors…`);
       let kept = 0;
-      for (let idx = 0; idx < target.length; idx++) {
-        if (job.cancel) throw new Error('cancelled');
-        const c = target[idx];
-        log('research', `Researching ${c.name}${c.firm && c.firm !== c.name && !/independent/i.test(c.firm) ? ` (${c.firm})` : ''}…`, 'info', c.name);
+      const PACE_MS = Number(process.env.AGENT_PACE_MS || 8000); // breathing room for free AI limits
+      const failed: DiscoveryCandidate[] = [];
+      const runOne = async (c: DiscoveryCandidate, retry: boolean) => {
+        log('research', `${retry ? 'Retrying' : 'Researching'} ${c.name}${c.firm && c.firm !== c.name && !/independent/i.test(c.firm) ? ` (${c.firm})` : ''}…`, 'info', c.name);
         try {
           const inv = await researchCandidate(startup, c, settings, log);
           if (inv.fitScore.total < (settings.minFitScoreToKeep ?? 0)) {
@@ -683,10 +691,31 @@ export function startAgentJob(
             log('outreach', `Drafted 4-step email cadence + LinkedIn note${inv.email ? ` (email found: ${inv.email})` : ''}`, 'success', c.name);
           }
         } catch (e: any) {
-          log('research', `Failed: ${String(e?.message || e).slice(0, 200)}`, 'error', c.name);
-          if (/No AI key/i.test(String(e?.message))) throw e;
+          const msg = String(e?.message || e);
+          if (/No AI key/i.test(msg)) throw e;
+          if (!retry && /AI providers failed|rate limited|busy|timeout/i.test(msg)) {
+            failed.push(c);
+            log('research', 'AI is busy (free limit) — will retry this investor at the end', 'warn', c.name);
+          } else {
+            log('research', `Failed: ${msg.slice(0, 200)}`, 'error', c.name);
+          }
         }
-        job.progress = Math.round(35 + ((idx + 1) / target.length) * 63);
+      };
+      for (let idx = 0; idx < target.length; idx++) {
+        if (job.cancel) throw new Error('cancelled');
+        await runOne(target[idx], false);
+        job.progress = Math.round(35 + ((idx + 1) / target.length) * 55);
+        if (idx < target.length - 1) await new Promise(r => setTimeout(r, PACE_MS));
+      }
+      if (failed.length) {
+        log('research', `Waiting 60 seconds, then retrying ${failed.length} investor(s) that hit the free AI limit…`, 'info');
+        await new Promise(r => setTimeout(r, Number(process.env.AGENT_RETRY_WAIT_MS || 60000)));
+        for (let idx = 0; idx < failed.length; idx++) {
+          if (job.cancel) throw new Error('cancelled');
+          await runOne(failed[idx], true);
+          job.progress = Math.round(90 + ((idx + 1) / failed.length) * 9);
+          if (idx < failed.length - 1) await new Promise(r => setTimeout(r, PACE_MS * 2));
+        }
       }
       job.progress = 100;
       job.status = 'done';
@@ -702,4 +731,139 @@ export function startAgentJob(
   })();
 
   return job;
+}
+
+
+// ---------------------------------------------------------------- Big runs (used by campaign.ts)
+
+/** Score many candidates cheaply from their search snippets — 10 per AI request. */
+export async function quickScoreCandidates(
+  s: StartupProfile,
+  cands: { id: string; name: string; firm: string; title: string; investorType: string; snippet: string; whyRelevant: string; location: string }[]
+): Promise<Map<string, { score: number; reason: string; isInvestor: boolean }>> {
+  const out = new Map<string, { score: number; reason: string; isInvestor: boolean }>();
+  if (!cands.length) return out;
+  const res = await chatJson<any>(
+    `You are a VC analyst doing a FAST first-pass fit check for ${s.name}. Use only the text given. ${HONESTY_RULES}`,
+    `STARTUP:\n${startupBrief(s).slice(0, 1500)}
+
+CANDIDATES:
+${cands.map((c, i) => `[${i + 1}] ${c.name} — ${c.title} @ ${c.firm} (${c.investorType}) ${c.location}\nSeen: ${c.snippet.slice(0, 300)}\nWhy found: ${c.whyRelevant}`).join('\n\n')}
+
+Return JSON: {"scores":[{"n":1,"score":0-100,"isInvestor":true/false,"reason":"one short sentence"}]} — one entry per candidate, same numbers.
+Scoring: 75+ clear thesis/stage fit for a kids/family consumer app at pre-seed; 50-74 adjacent (consumer, edtech, fintech, local angel); <50 weak or unclear. Be strict when the text is thin.`,
+    1500
+  );
+  for (const r of Array.isArray(res?.scores) ? res.scores : []) {
+    const c = cands[Number(r?.n) - 1];
+    if (!c) continue;
+    out.set(c.id, { score: clamp(r.score), reason: str(r.reason, 300), isInvestor: r.isInvestor !== false });
+  }
+  return out;
+}
+
+/** Ask the AI for NEW search queries (different from ones already used) so each run finds new people. */
+export async function generateSearchQueries(
+  s: StartupProfile,
+  settings: Partial<AppSettings>,
+  used: string[],
+  count = 24
+): Promise<string[]> {
+  const res = await chatJson<any>(
+    `You plan investor searches for ${s.name}. ${HONESTY_RULES}`,
+    `STARTUP:\n${startupBrief(s).slice(0, 2000)}
+Geography focus: ${settings.geographyFocus || 'United States'}
+
+Queries ALREADY USED (do not repeat or lightly reword them):
+${used.slice(-120).join('\n') || '(none)'}
+
+Write ${count} NEW, varied Google queries that surface SPECIFIC investors who could fund this company. Mix:
+- about half that find PUBLIC LinkedIn profiles: must start with site:linkedin.com/in and use quoted phrases (roles like "angel investor", "partner", "principal", "scout"; themes; cities; portfolio companies like Greenlight, GoHenry, BusyKid, Step, Outschool)
+- the rest find funds, angel groups, accelerators, family offices, and "investors in <comparable company>" lists
+Return JSON: {"queries":["..."]}`,
+    1500
+  );
+  const usedSet = new Set(used.map(q => q.toLowerCase().trim()));
+  return arr(res?.queries, count * 2)
+    .map(q => q.trim())
+    .filter(q => q.length > 8 && !usedSet.has(q.toLowerCase()))
+    .slice(0, count);
+}
+
+/** A lightweight CRM record from a quick-scored candidate (deep research can upgrade it later). */
+export function candidateToQuickInvestor(c: DiscoveryCandidate, score: number, reason: string, campaignId?: string): Investor {
+  const now = new Date().toISOString();
+  const status = fitStatus(score);
+  return {
+    id: uid('inv'),
+    name: c.name,
+    title: c.title || 'Investor',
+    firm: c.firm,
+    investorType: c.investorType,
+    website: c.websiteUrl || '',
+    email: '',
+    linkedin: c.linkedinUrl || '',
+    location: c.location || '',
+    stage: 'Unknown',
+    checkSizeFormatted: 'Unknown',
+    checkSizeMin: 0,
+    checkSizeMax: 0,
+    industries: [],
+    portfolio: [],
+    recentInvestments: [],
+    thesis: '',
+    contactRoute: c.linkedinUrl ? 'LinkedIn connection' : c.websiteUrl ? 'Website' : 'Unknown',
+    activePartner: c.name,
+    fitScore: {
+      total: score,
+      thesisMatch: score,
+      stageMatch: score,
+      sectorMatch: score,
+      checkSizeMatch: score,
+      synergyMatch: score,
+      status,
+      verdict: `Quick scan: ${reason || c.whyRelevant}`,
+      whyInvest: c.whyRelevant ? [c.whyRelevant] : [],
+      hesitations: ['Only quick-scanned from search results — open and click "Research deeply" before contacting.'],
+      keyTalkingPoint: ''
+    },
+    researchNotes: `Found via search: ${c.sourceTitle}. ${c.snippet.slice(0, 300)}`,
+    extractedData: {
+      rawUrl: c.sourceUrl,
+      crawledAt: now,
+      pageTitle: c.sourceTitle,
+      metaDescription: '',
+      extractedTextExcerpt: c.snippet,
+      keyQuotes: [],
+      portfolioFound: [],
+      detectedCheckSize: '',
+      detectedContactEmail: ''
+    },
+    sourceUrls: [c.sourceUrl].filter(Boolean),
+    outreach: { status: 'discovered', sequenceGenerated: false, sequences: [], sentStepsCount: 0 },
+    tags: ['Quick scan', c.investorType],
+    researchDepth: 'quick',
+    quickScore: score,
+    campaignId,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+/** Turn an existing CRM record back into a candidate so it can be deep-researched. */
+export function investorToCandidate(i: Investor): DiscoveryCandidate {
+  return {
+    id: i.id,
+    name: i.name,
+    firm: i.firm,
+    title: i.title,
+    investorType: (i.investorType || 'Other') as InvestorType,
+    linkedinUrl: i.linkedin || '',
+    websiteUrl: i.website || '',
+    sourceUrl: i.sourceUrls?.[0] || i.extractedData?.rawUrl || '',
+    sourceTitle: i.extractedData?.pageTitle || '',
+    snippet: i.extractedData?.extractedTextExcerpt || i.researchNotes || '',
+    whyRelevant: i.fitScore?.whyInvest?.[0] || '',
+    location: i.location || ''
+  };
 }

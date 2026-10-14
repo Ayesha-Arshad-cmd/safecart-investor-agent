@@ -15,14 +15,14 @@ interface ColumnDef {
 }
 
 const COLUMNS: ColumnDef[] = [
-  { key: 'discovered', label: 'Discovered', badgeColor: 'bg-zinc-800 text-zinc-300' },
-  { key: 'researched', label: 'Researched', badgeColor: 'bg-cyan-950 text-cyan-400 border border-cyan-800/60' },
-  { key: 'hot', label: '🔥 Hot (80%+)', badgeColor: 'bg-emerald-950 text-emerald-400 border border-emerald-800/60' },
-  { key: 'warm', label: '⚡ Warm (60-79%)', badgeColor: 'bg-amber-950 text-amber-400 border border-amber-800/60' },
-  { key: 'contacted', label: 'Contacted', badgeColor: 'bg-purple-950 text-purple-400 border border-purple-800/60' },
-  { key: 'replied', label: 'Replied', badgeColor: 'bg-blue-950 text-blue-400 border border-blue-800/60' },
-  { key: 'meeting', label: 'Meeting Booked', badgeColor: 'bg-emerald-900 text-emerald-200 border border-emerald-700' },
-  { key: 'passed', label: 'Passed', badgeColor: 'bg-zinc-900 text-zinc-500' },
+  { key: 'discovered', label: 'Discovered', badgeColor: 'bg-slate-100 text-slate-700' },
+  { key: 'researched', label: 'Researched', badgeColor: 'bg-cyan-50 text-cyan-600 border border-cyan-200' },
+  { key: 'hot', label: 'Hot (75+)', badgeColor: 'bg-emerald-50 text-emerald-600 border border-emerald-200' },
+  { key: 'warm', label: 'Warm (55–74)', badgeColor: 'bg-amber-50 text-amber-600 border border-amber-200' },
+  { key: 'contacted', label: 'Contacted', badgeColor: 'bg-purple-50 text-purple-600 border border-purple-200' },
+  { key: 'replied', label: 'Replied', badgeColor: 'bg-blue-50 text-blue-600 border border-blue-200' },
+  { key: 'meeting', label: 'Meeting Booked', badgeColor: 'bg-emerald-100 text-emerald-800 border border-emerald-300' },
+  { key: 'passed', label: 'Passed', badgeColor: 'bg-slate-50 text-slate-500' },
 ];
 
 export const TwentyKanban: React.FC<TwentyKanbanProps> = ({
@@ -53,14 +53,14 @@ export const TwentyKanban: React.FC<TwentyKanbanProps> = ({
         return (
           <div
             key={col.key}
-            className="w-72 shrink-0 bg-zinc-950/70 border border-zinc-800 rounded-lg flex flex-col max-h-[750px]"
+            className="w-72 shrink-0 bg-white border border-slate-200 rounded-lg flex flex-col max-h-[750px]"
           >
             {/* Column Header */}
-            <div className="p-3 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900/40">
-              <span className="font-semibold text-xs text-white tracking-tight flex items-center gap-1.5">
+            <div className="p-3 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50">
+              <span className="font-semibold text-xs text-slate-900 tracking-tight flex items-center gap-1.5">
                 <span>{col.label}</span>
               </span>
-              <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-medium ${col.badgeColor}`}>
+              <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${col.badgeColor}`}>
                 {colInvestors.length}
               </span>
             </div>
@@ -68,8 +68,8 @@ export const TwentyKanban: React.FC<TwentyKanbanProps> = ({
             {/* Column Cards */}
             <div className="p-2 space-y-2 overflow-y-auto flex-1 text-xs">
               {colInvestors.length === 0 ? (
-                <div className="h-28 flex items-center justify-center text-zinc-600 text-[11px] italic">
-                  No records
+                <div className="h-28 flex items-center justify-center text-slate-400 text-xs italic">
+                  Empty
                 </div>
               ) : (
                 colInvestors.map(inv => {
@@ -80,34 +80,34 @@ export const TwentyKanban: React.FC<TwentyKanbanProps> = ({
                     <div
                       key={inv.id}
                       onClick={() => onOpenInvestorDetail(inv)}
-                      className="bg-zinc-900/60 border border-zinc-800 hover:border-zinc-700 rounded-md p-3 transition-colors cursor-pointer group shadow-sm flex flex-col justify-between space-y-2.5"
+                      className="bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-md p-3 transition-colors cursor-pointer group shadow-sm flex flex-col justify-between space-y-2.5"
                     >
                       <div>
                         <div className="flex items-start justify-between gap-1.5">
-                          <h4 className="font-semibold text-zinc-100 group-hover:text-emerald-300 transition-colors text-xs leading-snug">
+                          <h4 className="font-semibold text-slate-900 group-hover:text-emerald-800 transition-colors text-xs leading-snug">
                             {inv.name}
                           </h4>
-                          <span className={`text-[10px] font-mono font-bold shrink-0 ${
-                            inv.fitScore.status === 'hot' ? 'text-emerald-400' :
-                            inv.fitScore.status === 'warm' ? 'text-amber-400' : 'text-zinc-500'
+                          <span className={`text-[11px] font-bold shrink-0 ${
+                            inv.fitScore.status === 'hot' ? 'text-emerald-600' :
+                            inv.fitScore.status === 'warm' ? 'text-amber-600' : 'text-slate-500'
                           }`}>
                             {inv.fitScore.total}%
                           </span>
                         </div>
 
-                        <div className="text-[11px] text-zinc-400 mt-0.5">
+                        <div className="text-xs text-slate-500 mt-0.5">
                           {inv.firm}
                         </div>
 
-                        <div className="flex items-center gap-2 text-[10px] text-zinc-500 mt-2 font-mono">
+                        <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-2">
                           <span>{inv.stage}</span>
                           <span>·</span>
-                          <span className="text-emerald-400 font-semibold">{inv.checkSizeFormatted}</span>
+                          <span className="text-emerald-600 font-semibold">{inv.checkSizeFormatted}</span>
                         </div>
 
                         <div className="mt-2 flex flex-wrap gap-1">
                           {inv.portfolio.slice(0, 2).map((p, idx) => (
-                            <span key={idx} className="text-[9px] px-1 py-0.2 rounded bg-zinc-950 text-zinc-400 border border-zinc-800">
+                            <span key={idx} className="text-[10px] px-1 py-0.2 rounded bg-white text-slate-500 border border-slate-200">
                               {p}
                             </span>
                           ))}
@@ -116,10 +116,10 @@ export const TwentyKanban: React.FC<TwentyKanbanProps> = ({
 
                       {/* Card Bottom Controls */}
                       <div 
-                        className="pt-2 border-t border-zinc-800/80 flex items-center justify-between text-[11px]"
+                        className="pt-2 border-t border-slate-200 flex items-center justify-between text-xs"
                         onClick={e => e.stopPropagation()}
                       >
-                        <span className="text-zinc-500 text-[10px] truncate max-w-[120px]">
+                        <span className="text-slate-500 text-[11px] truncate max-w-[120px]">
                           {inv.outreach.nextFollowUpDate ? `Due: ${inv.outreach.nextFollowUpDate}` : inv.location}
                         </span>
 
@@ -127,7 +127,7 @@ export const TwentyKanban: React.FC<TwentyKanbanProps> = ({
                           {prev && (
                             <button
                               onClick={() => onUpdateStatus(inv.id, prev)}
-                              className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                              className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors cursor-pointer"
                               title={`Move back to ${prev}`}
                             >
                               <ChevronLeft className="w-3 h-3" />
@@ -136,7 +136,7 @@ export const TwentyKanban: React.FC<TwentyKanbanProps> = ({
                           {next && (
                             <button
                               onClick={() => onUpdateStatus(inv.id, next)}
-                              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800/60 font-medium text-[10px] transition-colors cursor-pointer"
+                              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-medium text-[11px] transition-colors cursor-pointer"
                               title={`Advance to ${next}`}
                             >
                               <span>Next</span>

@@ -188,43 +188,43 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
       
       {/* Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-lg p-3">
-          <div className="text-[11px] font-mono text-zinc-400">TOTAL INVESTORS</div>
-          <div className="text-xl font-bold text-white font-mono mt-0.5">{investors.length}</div>
-          <div className="text-[10px] text-zinc-500 mt-1">AI-researched dossiers</div>
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+          <div className="text-xs text-slate-500">TOTAL INVESTORS</div>
+          <div className="text-xl font-bold text-slate-900 mt-0.5">{investors.length}</div>
+          <div className="text-[11px] text-slate-500 mt-1">In your list</div>
         </div>
 
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-lg p-3">
-          <div className="text-[11px] font-mono text-emerald-400">🔥 HOT LEADS (75+)</div>
-          <div className="text-xl font-bold text-emerald-400 font-mono mt-0.5">{hotCount}</div>
-          <div className="text-[10px] text-zinc-500 mt-1">High conviction for {startup.name}</div>
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+          <div className="text-xs text-emerald-600">HOT LEADS</div>
+          <div className="text-xl font-bold text-emerald-600 mt-0.5">{hotCount}</div>
+          <div className="text-[11px] text-slate-500 mt-1">Score 75+</div>
         </div>
 
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-lg p-3">
-          <div className="text-[11px] font-mono text-purple-400">CONTACTED (CADENCE)</div>
-          <div className="text-xl font-bold text-purple-300 font-mono mt-0.5">{contactedCount}</div>
-          <div className="text-[10px] text-zinc-500 mt-1">In active follow-up cadence</div>
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+          <div className="text-xs text-purple-600">CONTACTED</div>
+          <div className="text-xl font-bold text-purple-700 mt-0.5">{contactedCount}</div>
+          <div className="text-[11px] text-slate-500 mt-1">Waiting for reply</div>
         </div>
 
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-lg p-3">
-          <div className="text-[11px] font-mono text-cyan-400">MEETINGS BOOKED</div>
-          <div className="text-xl font-bold text-cyan-300 font-mono mt-0.5">{meetingCount}</div>
-          <div className="text-[10px] text-zinc-500 mt-1">{repliedCount} Total replies</div>
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+          <div className="text-xs text-cyan-600">MEETINGS BOOKED</div>
+          <div className="text-xl font-bold text-cyan-700 mt-0.5">{meetingCount}</div>
+          <div className="text-[11px] text-slate-500 mt-1">{repliedCount} replies</div>
         </div>
       </div>
 
       {/* Control Bar: Search, Filters, View Mode & Export */}
-      <div className="bg-zinc-900/40 border border-zinc-800 rounded-lg p-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 text-xs">
+      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 text-xs">
         
         {/* Left: Search input */}
         <div className="relative flex-1">
-          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-2.5" />
+          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
           <input
             type="text"
             value={searchFilter}
             onChange={e => setSearchFilter(e.target.value)}
             placeholder="Search investors, firms, portfolio companies, location..."
-            className="w-full bg-zinc-950 border border-zinc-800 rounded pl-8 pr-3 py-1.5 text-white focus:outline-none focus:border-emerald-500 text-xs"
+            className="w-full bg-white border border-slate-200 rounded pl-8 pr-3 py-1.5 text-slate-900 focus:outline-none focus:border-emerald-400 text-xs"
           />
         </div>
 
@@ -233,7 +233,7 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
           <select
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}
-            className="bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-zinc-300 focus:outline-none focus:border-emerald-500"
+            className="bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-700 focus:outline-none focus:border-emerald-400"
           >
             <option value="all">All Statuses</option>
             <option value="discovered">Discovered</option>
@@ -249,7 +249,7 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
           <select
             value={stageFilter}
             onChange={e => setStageFilter(e.target.value)}
-            className="bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-zinc-300 focus:outline-none focus:border-emerald-500"
+            className="bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-700 focus:outline-none focus:border-emerald-400"
           >
             <option value="all">All Stages</option>
             <option value="Pre-seed">Pre-seed</option>
@@ -262,11 +262,11 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
         <div className="flex items-center gap-2 shrink-0">
           
           {/* Table / Kanban switch */}
-          <div className="flex items-center border border-zinc-800 rounded overflow-hidden bg-zinc-950">
+          <div className="flex items-center border border-slate-200 rounded overflow-hidden bg-white">
             <button
               onClick={() => setViewMode('table')}
               className={`p-1.5 transition-colors cursor-pointer ${
-                viewMode === 'table' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'
+                viewMode === 'table' ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:text-slate-800'
               }`}
               title="Table view"
             >
@@ -275,9 +275,9 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
             <button
               onClick={() => setViewMode('kanban')}
               className={`p-1.5 transition-colors cursor-pointer ${
-                viewMode === 'kanban' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'
+                viewMode === 'kanban' ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:text-slate-800'
               }`}
-              title="Kanban Pipeline Board"
+              title="Board view"
             >
               <Kanban className="w-3.5 h-3.5" />
             </button>
@@ -286,39 +286,21 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
           {/* Add custom lead */}
           <button
             onClick={() => setIsAddingNew(!isAddingNew)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors cursor-pointer font-medium"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 transition-colors cursor-pointer font-medium"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Add Lead</span>
+            <span>Add investor</span>
           </button>
 
           {/* Export Dropdown buttons */}
           <div className="flex items-center gap-1">
             <button
               onClick={handleDownloadCsv}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-slate-900 transition-colors cursor-pointer"
               title="Download full CSV"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-              <span>CSV</span>
-            </button>
-
-            <button
-              onClick={handleDownloadMauticCsv}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer"
-              title="Export contacts for self-hosted Mautic import"
-            >
-              <Mail className="w-3.5 h-3.5 text-purple-400" />
-              <span>Mautic</span>
-            </button>
-
-            <button
-              onClick={handleDownloadTwentyJson}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer"
-              title="Download Twenty CRM JSON format"
-            >
-              <FileCode className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Twenty JSON</span>
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Export CSV</span>
             </button>
           </div>
 
@@ -328,13 +310,13 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
 
       {/* Add New Custom Lead Drawer */}
       {isAddingNew && (
-        <form onSubmit={handleCreateCustomLead} className="p-4 bg-zinc-900/80 border border-emerald-500/40 rounded-lg space-y-3 text-xs">
+        <form onSubmit={handleCreateCustomLead} className="p-4 bg-slate-50 border border-emerald-300 rounded-lg space-y-3 text-xs">
           <div className="flex items-center justify-between">
-            <span className="font-semibold text-white">Add an investor you already know (then AI-score it)</span>
+            <span className="font-semibold text-slate-900">Add an investor you already know</span>
             <button 
               type="button" 
               onClick={() => setIsAddingNew(false)}
-              className="text-zinc-500 hover:text-zinc-300"
+              className="text-slate-500 hover:text-slate-800"
             >
               Cancel
             </button>
@@ -346,7 +328,7 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
               placeholder="Full name"
               value={newName}
               onChange={e => setNewName(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-white"
+              className="bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-900"
               required
             />
             <input
@@ -354,7 +336,7 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
               placeholder="Firm / angel group (or Independent Angel)"
               value={newFirm}
               onChange={e => setNewFirm(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-white"
+              className="bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-900"
               required
             />
             <input
@@ -362,7 +344,7 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
               placeholder="Direct Email"
               value={newEmail}
               onChange={e => setNewEmail(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-white"
+              className="bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-900"
             />
           </div>
 
@@ -372,12 +354,12 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
               placeholder="Website URL"
               value={newWebsite}
               onChange={e => setNewWebsite(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-white"
+              className="bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-900"
             />
             <select
               value={newStage}
               onChange={e => setNewStage(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-white"
+              className="bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-900"
             >
               <option value="Pre-seed">Pre-seed</option>
               <option value="Seed">Seed</option>
@@ -388,7 +370,7 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
               placeholder="Check Size (e.g. $50k - $150k)"
               value={newCheck}
               onChange={e => setNewCheck(e.target.value)}
-              className="bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-white"
+              className="bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-900"
             />
           </div>
 
@@ -397,13 +379,13 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
             placeholder="LinkedIn profile URL (optional, e.g. https://www.linkedin.com/in/...)"
             value={newLinkedin}
             onChange={e => setNewLinkedin(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-white"
+            className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-900"
           />
 
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="submit"
-              className="px-4 py-1.5 bg-emerald-400 hover:bg-emerald-300 text-emerald-950 font-semibold rounded text-xs transition-colors cursor-pointer"
+              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded text-xs transition-colors cursor-pointer"
             >
               Save to CRM
             </button>
@@ -429,11 +411,11 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
       )}
 
       {/* Footer helper */}
-      <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-2">
-        <span>Showing {filteredInvestors.length} of {investors.length} records</span>
+      <div className="flex items-center justify-between text-xs text-slate-500 pt-2">
+        <span>Showing {filteredInvestors.length} of {investors.length}</span>
         <button
           onClick={onClearCrm}
-          className="text-zinc-500 hover:text-red-400 flex items-center gap-1 cursor-pointer transition-colors"
+          className="text-slate-500 hover:text-red-700 flex items-center gap-1 cursor-pointer transition-colors"
         >
           <RotateCcw className="w-3 h-3" />
           <span>Clear all investors</span>

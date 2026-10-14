@@ -1,7 +1,10 @@
 /**
- * Tiny JSON-file database (the real "CRM" storage — replaces browser-only localStorage).
+ * Tiny JSON-file database (the real "CRM" storage).
  * Set DATA_DIR to a Railway Volume mount path (e.g. /data) so data survives redeploys.
  * No database server, no install, $0.
+ *
+ * Both the browser AND the server (big runs, automatic emails) change investors,
+ * so saves are merged per investor using `updatedAt` — nobody overwrites anybody.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,6 +13,20 @@ export interface StoredState {
   startup: any | null;
   investors: any[];
   settings: any | null;
+  /** The current / last big run (see campaign.ts). */
+  campaign?: any | null;
+  /** Search queries already used (query|page) so the next run finds NEW investors. */
+  usedQueries?: string[];
+  /** Automatic email + LinkedIn bookkeeping (see automation.ts). */
+  automation?: {
+    sentLog?: { at: string; investorId: string; step: number }[];
+    lastRunAt?: string;
+    lastCheckAt?: string;
+    lastError?: string;
+    recent?: { at: string; message: string; level: 'info' | 'success' | 'warn' | 'error' }[];
+  };
+  /** Ids the user deleted — stops background jobs from bringing them back. */
+  deletedIds?: string[];
   updatedAt: string;
 }
 
@@ -34,6 +51,9 @@ export function loadState(): StoredState {
     cache = { startup: null, investors: [], settings: null, updatedAt: '' };
   }
   if (!Array.isArray(cache!.investors)) cache!.investors = [];
+  if (!Array.isArray(cache!.usedQueries)) cache!.usedQueries = [];
+  if (!Array.isArray(cache!.deletedIds)) cache!.deletedIds = [];
+  if (!cache!.automation) cache!.automation = {};
   return cache!;
 }
 
@@ -48,17 +68,61 @@ function flush() {
   }
 }
 
-export function saveState(patch: Partial<StoredState>): StoredState {
-  const cur = loadState();
-  cache = {
-    startup: patch.startup !== undefined ? patch.startup : cur.startup,
-    investors: patch.investors !== undefined ? patch.investors : cur.investors,
-    settings: patch.settings !== undefined ? patch.settings : cur.settings,
-    updatedAt: new Date().toISOString()
-  };
+function scheduleFlush() {
+  cache!.updatedAt = new Date().toISOString();
   if (writeTimer) clearTimeout(writeTimer);
   writeTimer = setTimeout(flush, 300);
-  return cache;
+}
+
+const time = (x: any) => Date.parse(x?.updatedAt || x?.createdAt || '') || 0;
+
+/** Merge a list of investors into the database, keeping the newer copy of each one. */
+export function mergeInvestors(incoming: any[], deletedIds: string[] = []): void {
+  const st = loadState();
+  if (deletedIds.length) {
+    const del = new Set(deletedIds);
+    st.investors = st.investors.filter(i => !del.has(i.id));
+    st.deletedIds = [...new Set([...(st.deletedIds || []), ...deletedIds])].slice(-5000);
+  }
+  const deleted = new Set(st.deletedIds || []);
+  const byId = new Map(st.investors.map(i => [i.id, i]));
+  for (const inv of incoming || []) {
+    if (!inv?.id || deleted.has(inv.id)) continue;
+    const cur = byId.get(inv.id);
+    if (!cur || time(inv) >= time(cur)) byId.set(inv.id, inv);
+  }
+  // keep newest first
+  st.investors = [...byId.values()].sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+  scheduleFlush();
+}
+
+/** Server-side change to one investor (automation / research). */
+export function updateInvestor(id: string, fn: (inv: any) => any): any | null {
+  const st = loadState();
+  const idx = st.investors.findIndex(i => i.id === id);
+  if (idx === -1) return null;
+  const next = { ...fn(st.investors[idx]), updatedAt: new Date().toISOString() };
+  st.investors[idx] = next;
+  scheduleFlush();
+  return next;
+}
+
+/** Remove everything (Clear CRM). */
+export function clearInvestors(): void {
+  const st = loadState();
+  st.deletedIds = [...new Set([...(st.deletedIds || []), ...st.investors.map(i => i.id)])].slice(-5000);
+  st.investors = [];
+  scheduleFlush();
+}
+
+export function saveState(patch: Partial<StoredState>): StoredState {
+  const cur = loadState();
+  for (const k of Object.keys(patch) as (keyof StoredState)[]) {
+    if (patch[k] !== undefined && k !== 'investors') (cur as any)[k] = patch[k];
+  }
+  if (patch.investors !== undefined) cur.investors = patch.investors;
+  scheduleFlush();
+  return cur;
 }
 
 export function flushNow() {

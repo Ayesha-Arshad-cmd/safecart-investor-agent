@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Database, Mail, Cpu, Settings, Play, Brain, Info } from 'lucide-react';
+import { Search, Users, Mail, BarChart3, Settings, Play, Building2, HelpCircle, ShoppingCart } from 'lucide-react';
 import { StartupProfile, HealthInfo } from '../types';
 
 export type TabId = 'brain' | 'discovery' | 'scoring' | 'crm' | 'outreach';
@@ -32,8 +32,8 @@ export const Header: React.FC<HeaderProps> = ({
   const tab = (id: TabId, icon: React.ReactNode, label: string, badge?: React.ReactNode) => (
     <button
       onClick={() => setActiveTab(id)}
-      className={`flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
-        activeTab === id ? 'bg-zinc-800 text-white border border-zinc-700/60' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+      className={`flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+        activeTab === id ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
       }`}
     >
       {icon}
@@ -42,83 +42,78 @@ export const Header: React.FC<HeaderProps> = ({
     </button>
   );
 
+  const aiOk = !!health?.ai.configured;
+
   return (
-    <header className="border-b border-zinc-800 bg-zinc-950/90 backdrop-blur sticky top-0 z-40">
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 font-mono font-bold text-sm">
-              $0
+            <div className="w-9 h-9 rounded-xl shadow-sm bg-emerald-600 flex items-center justify-center text-white shrink-0">
+              <ShoppingCart className="w-5 h-5" />
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-white tracking-tight text-sm sm:text-lg truncate">
-                  {startup.name} <span className="text-zinc-500 font-normal text-xs sm:text-sm">Investor Agent</span>
-                </span>
-              </div>
-              <p className="text-xs text-zinc-400 truncate hidden sm:block">
-                Finds investors on the web & LinkedIn → researches → scores → writes outreach → tracks follow-ups
-              </p>
+            <div className="min-w-0 leading-tight">
+              <div className="font-semibold text-slate-900 text-base truncate">{startup.name}</div>
+              <div className="text-xs text-slate-500">Investor Agent</div>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
             <span
-              className={`hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium border ${
-                health?.ai.configured ? 'bg-emerald-950 text-emerald-300 border-emerald-800/60' : 'bg-zinc-900 text-zinc-400 border-zinc-800'
+              className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                aiOk ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
               }`}
-              title="AI providers configured on the server"
+              title="AI connection"
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${health?.ai.configured ? 'bg-emerald-400' : 'bg-zinc-500'}`} />
-              {health ? (health.ai.configured ? `AI: ${health.ai.providers[0]}` : 'AI: not set') : 'connecting…'}
+              <span className={`w-1.5 h-1.5 rounded-full ${aiOk ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              {health ? (aiOk ? 'AI connected' : 'AI not connected') : 'Connecting…'}
             </span>
             <button
               onClick={onOpenArchitectureModal}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-md transition-colors cursor-pointer"
-              title="How the agent works"
+              className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              title="How it works"
             >
-              <Info className="w-3.5 h-3.5 text-zinc-400" />
-              <span className="hidden sm:inline">How it works</span>
-            </button>
-            <button
-              onClick={onOpenRunnerModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-950 bg-emerald-400 hover:bg-emerald-300 rounded-md transition-all shadow-sm cursor-pointer"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              <span className="hidden sm:inline">Run Agent</span>
+              <HelpCircle className="w-5 h-5" />
             </button>
             <button
               onClick={onOpenSettingsModal}
-              className="p-2 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 border border-transparent hover:border-zinc-800 rounded-md transition-colors cursor-pointer"
-              title="Settings & connection status"
+              className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              title="Settings"
             >
-              <Settings className="w-4 h-4" />
+              <Settings className="w-5 h-5" />
+            </button>
+            <button
+              onClick={onOpenRunnerModal}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors cursor-pointer"
+            >
+              <Play className="w-4 h-4 fill-current" />
+              <span className="hidden sm:inline">Find investors</span>
             </button>
           </div>
         </div>
 
-        <div className="flex items-center space-x-1 sm:space-x-2 border-t border-zinc-900 py-1 overflow-x-auto no-scrollbar">
-          {tab('brain', <Brain className="w-3.5 h-3.5 text-pink-400" />, `1 · ${startup.name} Brain`)}
-          {tab('discovery', <Search className="w-3.5 h-3.5 text-cyan-400" />, '2 · Find Investors')}
+        <nav className="flex items-center gap-1 py-2 overflow-x-auto no-scrollbar">
+          {tab('brain', <Building2 className="w-4 h-4" />, 'Your App')}
+          {tab('discovery', <Search className="w-4 h-4" />, 'Search')}
           {tab(
             'scoring',
-            <Cpu className="w-3.5 h-3.5 text-amber-400" />,
-            '3 · AI Scoring',
-            <span className="text-[11px] px-1.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 font-mono">{hotLeadsCount} hot</span>
+            <BarChart3 className="w-4 h-4" />,
+            'Scores',
+            hotLeadsCount > 0 ? <span className="text-xs px-1.5 rounded-full bg-emerald-100 text-emerald-700">{hotLeadsCount}</span> : undefined
           )}
           {tab(
             'crm',
-            <Database className="w-3.5 h-3.5 text-emerald-400" />,
-            '4 · CRM Pipeline',
-            <span className="text-[11px] px-1.5 rounded bg-zinc-900 text-zinc-300 font-mono">{totalInvestorsCount}</span>
+            <Users className="w-4 h-4" />,
+            'Investors',
+            <span className="text-xs px-1.5 rounded-full bg-slate-100 text-slate-600">{totalInvestorsCount}</span>
           )}
           {tab(
             'outreach',
-            <Mail className="w-3.5 h-3.5 text-purple-400" />,
-            '5 · Outreach & Follow-ups',
-            dueCount > 0 ? <span className="text-[11px] px-1.5 rounded bg-purple-900 text-purple-200 font-mono">{dueCount} due</span> : undefined
+            <Mail className="w-4 h-4" />,
+            'Outreach',
+            dueCount > 0 ? <span className="text-xs px-1.5 rounded-full bg-amber-100 text-amber-700">{dueCount} due</span> : undefined
           )}
-        </div>
+        </nav>
       </div>
     </header>
   );

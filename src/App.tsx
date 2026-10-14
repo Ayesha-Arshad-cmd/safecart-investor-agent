@@ -63,7 +63,7 @@ export default function App() {
         setInvestors(state.investors);
       } else if (loadStoredInvestors().length) {
         // first deploy: push the browser copy up to the server
-        await api.saveState({ investors: loadStoredInvestors() });
+        await api.saveState({ investors: loadStoredInvestors().map(i => ({ ...i, updatedAt: i.updatedAt || new Date().toISOString() })) });
       }
       if (state.startup) setStartup({ ...DEFAULT_STARTUP, ...state.startup });
       if (state.settings) setSettings({ ...DEFAULT_SETTINGS, ...state.settings });
@@ -82,8 +82,17 @@ export default function App() {
     return () => window.removeEventListener('safecart-auth-required', onAuth);
   }, [loadFromServer]);
 
-  // ---------- persist (browser cache immediately, server debounced)
+  // ---------- persist: browser cache immediately; server gets ONLY what changed here (debounced)
+  // The server also changes investors (big runs, auto-emails, replies), so we merge instead of overwrite.
+  const dirtyIds = useRef<Set<string>>(new Set());
+  const deletedIds = useRef<Set<string>>(new Set());
+  const clearAll = useRef(false);
+  const lastMeta = useRef('');
   const saveTimer = useRef<number | undefined>(undefined);
+  const investorsRef = useRef<Investor[]>(investors);
+  investorsRef.current = investors;
+  const touch = (...ids: string[]) => ids.forEach(id => dirtyIds.current.add(id));
+
   useEffect(() => {
     if (!loaded) return;
     saveStoredInvestors(investors);
@@ -92,14 +101,65 @@ export default function App() {
     if (needsPassword || serverReachable === false) return;
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      api.saveState({ investors, startup, settings }).catch(() => {
-        /* offline: browser copy is kept */
-      });
+      const meta = JSON.stringify({ startup, settings });
+      const changed = investors.filter(i => dirtyIds.current.has(i.id));
+      const deleted = [...deletedIds.current];
+      if (!changed.length && !deleted.length && !clearAll.current && meta === lastMeta.current) return;
+      const sentVersion = new Map(changed.map(i => [i.id, i.updatedAt]));
+      const wasClear = clearAll.current;
+      api
+        .saveState({ investors: changed, deletedIds: deleted, clearAll: wasClear || undefined, startup, settings })
+        .then(() => {
+          // only clear ids that weren't edited again while this save was in flight
+          const now = new Map(investorsRef.current.map(i => [i.id, i.updatedAt]));
+          sentVersion.forEach((v, id) => {
+            if (now.get(id) === v || !now.has(id)) dirtyIds.current.delete(id);
+          });
+          deleted.forEach(id => deletedIds.current.delete(id));
+          if (wasClear) clearAll.current = false;
+          lastMeta.current = meta;
+        })
+        .catch(() => {
+          /* offline: browser copy is kept, retried on next change */
+        });
     }, 800);
   }, [investors, startup, settings, loaded, needsPassword, serverReachable]);
 
+  // ---------- pull server-side changes (new investors from big runs, auto-emails, replies, LinkedIn accepts)
+  const pullServer = useCallback(async () => {
+    try {
+      const state = await api.loadState();
+      const server: Investor[] = state.investors || [];
+      setInvestors(prev => {
+        const local = new Map(prev.map(i => [i.id, i]));
+        const out: Investor[] = [];
+        const seen = new Set<string>();
+        for (const sv of server) {
+          if (deletedIds.current.has(sv.id)) continue;
+          const lc = local.get(sv.id);
+          const keepLocal = lc && (dirtyIds.current.has(sv.id) || (Date.parse(lc.updatedAt) || 0) > (Date.parse(sv.updatedAt) || 0));
+          out.push(keepLocal ? lc! : sv);
+          seen.add(sv.id);
+        }
+        // local investors not yet saved to the server
+        for (const lc of prev) if (!seen.has(lc.id) && dirtyIds.current.has(lc.id)) out.unshift(lc);
+        const same = out.length === prev.length && out.every((x, k) => x === prev[k]);
+        return same ? prev : out;
+      });
+    } catch {
+      /* ignore — next poll */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!loaded || needsPassword || serverReachable === false) return;
+    const t = window.setInterval(pullServer, 20000);
+    return () => window.clearInterval(t);
+  }, [loaded, needsPassword, serverReachable, pullServer]);
+
   // ---------- CRM mutations
   const handleUpdateInvestor = (updated: Investor, quiet = false) => {
+    touch(updated.id);
     setInvestors(prev => prev.map(i => (i.id === updated.id ? { ...updated, updatedAt: new Date().toISOString() } : i)));
     if (!quiet) showToast(`Updated ${updated.name}`);
   };
@@ -107,26 +167,39 @@ export default function App() {
   const handleAddInvestor = (newInv: Investor, quiet = false) => {
     setInvestors(prev => {
       const existing = prev.find(i => sameInvestor(i, newInv));
-      if (existing) return prev.map(i => (i === existing ? { ...newInv, id: existing.id, outreach: { ...newInv.outreach, ...pickProgress(existing) } } : i));
+      if (existing) {
+        touch(existing.id);
+        return prev.map(i =>
+          i === existing ? { ...newInv, id: existing.id, updatedAt: new Date().toISOString(), outreach: { ...newInv.outreach, ...pickProgress(existing) } } : i
+        );
+      }
+      touch(newInv.id);
       return [newInv, ...prev];
     });
     if (!quiet) showToast(`Added ${newInv.name}${newInv.firm && !/independent/i.test(newInv.firm) ? ` (${newInv.firm})` : ''} to CRM`);
   };
 
-  const patchOutreach = (id: string, patch: Partial<Investor['outreach']>) =>
+  const patchOutreach = (id: string, patch: Partial<Investor['outreach']>) => {
+    touch(id);
     setInvestors(prev => prev.map(inv => (inv.id === id ? { ...inv, outreach: { ...inv.outreach, ...patch }, updatedAt: new Date().toISOString() } : inv)));
+  };
 
   const handleUpdateStatus = (id: string, status: OutreachStatus) => patchOutreach(id, { status });
   const handleUpdateFollowUp = (id: string, nextFollowUpDate: string) => patchOutreach(id, { nextFollowUpDate });
 
   const handleDeleteInvestor = (id: string) => {
     if (!confirm('Remove this investor from your CRM?')) return;
+    deletedIds.current.add(id);
+    dirtyIds.current.delete(id);
     setInvestors(prev => prev.filter(inv => inv.id !== id));
     showToast('Investor removed');
   };
 
   const handleClearCrm = () => {
     if (!confirm('Delete ALL investors from the CRM? This cannot be undone (export a CSV first if you want a backup).')) return;
+    clearAll.current = true;
+    investors.forEach(i => deletedIds.current.add(i.id));
+    dirtyIds.current.clear();
     setInvestors([]);
     showToast('CRM cleared');
   };
@@ -159,33 +232,32 @@ export default function App() {
   const common = { startup, settings, investors, onOpenInvestorDetail: openDetail, showToast };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col selection:bg-emerald-500/20 selection:text-emerald-300">
+    <div className="min-h-screen bg-[#f4f6fa] text-slate-900 flex flex-col font-sans">
       {toast && (
         <div
-          className={`fixed bottom-4 right-4 left-4 sm:left-auto z-[60] max-w-md border px-4 py-2.5 rounded-lg shadow-xl text-xs flex items-start gap-2 ${
-            toast.error ? 'bg-red-950 border-red-800 text-red-100' : 'bg-zinc-900 border-zinc-700 text-white'
+          className={`fixed bottom-4 right-4 left-4 sm:left-auto z-[60] max-w-md border px-4 py-3 rounded-xl shadow-lg text-sm flex items-start gap-2 ${
+            toast.error ? 'bg-red-50 border-red-200 text-red-900' : 'bg-slate-50 border-slate-300 text-slate-900'
           }`}
         >
-          {toast.error ? <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" /> : <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
+          {toast.error ? <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" /> : <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
           <span className="break-words">{toast.msg}</span>
         </div>
       )}
 
       {needsPassword && (
-        <div className="fixed inset-0 z-[70] bg-black/85 flex items-center justify-center p-4">
-          <form onSubmit={submitPassword} className="bg-zinc-950 border border-zinc-800 rounded-xl p-6 w-full max-w-sm space-y-3">
-            <div className="flex items-center gap-2 text-white font-semibold">
-              <Lock className="w-4 h-4 text-emerald-400" /> Enter app password
+        <div className="fixed inset-0 z-[70] bg-slate-900/40 flex items-center justify-center p-4">
+          <form onSubmit={submitPassword} className="bg-white border border-slate-200 rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-3">
+            <div className="flex items-center gap-2 text-slate-900 font-semibold">
+              <Lock className="w-4 h-4 text-emerald-600" /> Enter app password
             </div>
-            <p className="text-xs text-zinc-400">This is the APP_PASSWORD you set in Railway → Variables.</p>
-            <input
+                        <input
               type="password"
               autoFocus
               value={passwordInput}
               onChange={e => setPasswordInput(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-400"
             />
-            <button className="w-full py-2 rounded bg-emerald-400 hover:bg-emerald-300 text-emerald-950 text-sm font-semibold">Unlock</button>
+            <button className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold">Unlock</button>
           </form>
         </div>
       )}
@@ -204,13 +276,13 @@ export default function App() {
       />
 
       {serverReachable === false && (
-        <div className="bg-amber-950/60 border-b border-amber-800 text-amber-200 text-xs px-4 py-2 text-center">
-          Can't reach the agent server. You're seeing the copy saved in this browser. (On Railway this means the service is restarting or crashed — check its Deploy Logs.)
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-4 py-2 text-center">
+          Can't reach the server right now — showing the copy saved in this browser.
         </div>
       )}
       {health && !health.ai.configured && (
-        <div className="bg-red-950/60 border-b border-red-800 text-red-200 text-xs px-4 py-2 text-center">
-          No AI key set yet. In Railway → your service → Variables, add <b>GEMINI_API_KEY</b> (free, no card: aistudio.google.com/apikey) and redeploy.
+        <div className="bg-red-50 border-b border-red-200 text-red-800 text-xs px-4 py-2 text-center">
+          AI isn't connected yet — add <b>GEMINI_API_KEY</b> to your settings (.env locally, Variables on Railway).
         </div>
       )}
 
@@ -237,16 +309,8 @@ export default function App() {
         {activeTab === 'outreach' && <MauticCampaignsTab {...common} health={health} onUpdateInvestor={handleUpdateInvestor} />}
       </main>
 
-      <footer className="border-t border-zinc-900 bg-zinc-950 py-4 text-center text-xs text-zinc-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${health?.ai.configured ? 'bg-emerald-500' : 'bg-zinc-600'}`}></span>
-            <span>
-              AI: {health?.ai.providers.join(' → ') || '—'} · Search: {health?.search.providers.join(' → ') || '—'}
-            </span>
-          </div>
-          <div className="text-[11px] text-zinc-500">{startup.name} Investor Agent · free-tier stack · no credit card</div>
-        </div>
+      <footer className="py-5 text-center text-xs text-slate-400">
+        {startup.name} Investor Agent
       </footer>
 
       <ArchitectureModal isOpen={isArchitectureModalOpen} onClose={() => setIsArchitectureModalOpen(false)} />
@@ -257,7 +321,7 @@ export default function App() {
         startup={startup}
         settings={settings}
         existingInvestors={investors}
-        onAddOrUpdateInvestor={inv => handleAddInvestor(inv, true)}
+        onRefresh={pullServer}
         onStartupIntel={intel => handleSaveStartup({ ...startup, ...intel }, '')}
         onCompletePipeline={count => {
           showToast(`Agent finished: ${count} investors added to your CRM`);

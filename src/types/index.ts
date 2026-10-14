@@ -82,6 +82,12 @@ export interface Investor {
   linkedinNote?: string;
   /** Longer LinkedIn DM to send after they accept. */
   linkedinMessage?: string;
+  /** 'quick' = scored from search results only; 'deep' = website researched + outreach written. */
+  researchDepth?: 'quick' | 'deep';
+  /** Search-snippet score from the quick scan (0-100). */
+  quickScore?: number;
+  /** Campaign run that found this investor. */
+  campaignId?: string;
   outreach: {
     status: OutreachStatus;
     sequenceGenerated: boolean;
@@ -92,6 +98,12 @@ export interface Investor {
     replyDate?: string;
     sentStepsCount: number;
     linkedinRequestSentAt?: string;
+    linkedinAcceptedAt?: string;
+    linkedinMessagedAt?: string;
+    /** Stop automatic emails for this investor only. */
+    autoPaused?: boolean;
+    /** Why the last automatic email failed (if it did). */
+    autoError?: string;
   };
   tags: string[];
   createdAt: string;
@@ -153,6 +165,61 @@ export interface AppSettings {
   includeLocalAngelGroups: boolean;
   senderName: string;
   senderEmail: string;
+
+  // ---- big runs ----
+  /** Deep-research (read website + write outreach) only investors whose quick score is at least this. */
+  deepResearchMinScore: number;
+  /** Max investors to deep-research per run (the rest stay as quick-scanned). */
+  deepResearchPerRun: number;
+
+  // ---- automatic email (needs the Gmail script) ----
+  autoEmailEnabled: boolean;
+  autoEmailMinScore: number;
+  dailyEmailLimit: number;
+  /** Minutes to wait after an investor is added before the first automatic email (time to cancel). */
+  emailHoldMinutes: number;
+  /** Company postal address — US anti-spam law (CAN-SPAM) requires it in cold emails. */
+  companyAddress: string;
+
+  // ---- LinkedIn ----
+  linkedinDailyLimit: number;
+}
+
+export interface CampaignCandidate extends DiscoveryCandidate {
+  stage: 'found' | 'quick' | 'researched' | 'skipped' | 'failed';
+  quickScore?: number;
+  quickReason?: string;
+  investorId?: string;
+  attempts?: number;
+}
+
+export interface Campaign {
+  id: string;
+  status: 'running' | 'paused' | 'done' | 'error';
+  target: number;
+  mode: 'quick' | 'deep';
+  startedAt: string;
+  finishedAt?: string;
+  phase: 'queries' | 'search' | 'extract' | 'quick' | 'deep' | 'done';
+  queries: string[];
+  queryCursor: number;
+  candidates: CampaignCandidate[];
+  logs: PipelineExecutionLog[];
+  error?: string;
+  counts?: { found: number; quick: number; researched: number; skipped: number; failed: number };
+}
+
+export interface AutomationStatus {
+  emailProvider: string;
+  autoEmailEnabled: boolean;
+  sentToday: number;
+  dailyLimit: number;
+  gmailRemaining?: number;
+  queued: number;
+  lastRunAt?: string;
+  lastCheckAt?: string;
+  lastError?: string;
+  recent: { at: string; message: string; level: 'info' | 'success' | 'warn' | 'error' }[];
 }
 
 /** A raw "possible investor" found by search, before deep research. */

@@ -53,7 +53,8 @@ function splitSiteOperator(q: string): { query: string; domain?: string } {
   return { query: q.replace(m[0], '').trim(), domain: m[1] };
 }
 
-async function tavily(query: string, max: number): Promise<SearchResult[]> {
+async function tavily(query: string, max: number, page = 1): Promise<SearchResult[]> {
+  if (page > 1) return []; // Tavily has no paging
   const { query: q, domain } = splitSiteOperator(query);
   const body: any = { query: domain ? `${q} ${domain.includes('linkedin') ? 'LinkedIn' : ''}`.trim() : q, max_results: Math.min(max, 20), search_depth: 'basic' };
   if (domain) body.include_domains = [domain.replace(/\/.*$/, '')];
@@ -78,11 +79,11 @@ async function tavily(query: string, max: number): Promise<SearchResult[]> {
   return results;
 }
 
-async function serper(query: string, max: number): Promise<SearchResult[]> {
+async function serper(query: string, max: number, page = 1): Promise<SearchResult[]> {
   const res = await fetch('https://google.serper.dev/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-API-KEY': env('SERPER_API_KEY') },
-    body: JSON.stringify({ q: query, num: Math.min(max, 20) }),
+    body: JSON.stringify(page > 1 ? { q: query, num: Math.min(max, 20), page } : { q: query, num: Math.min(max, 20) }),
     signal: AbortSignal.timeout(20000)
   });
   if (!res.ok) throw new Error(`serper ${res.status}: ${(await res.text()).slice(0, 150)}`);
@@ -112,7 +113,8 @@ export function parseDuckDuckGoHtml(html: string): SearchResult[] {
   return out;
 }
 
-async function duckduckgo(query: string, max: number): Promise<SearchResult[]> {
+async function duckduckgo(query: string, max: number, page = 1): Promise<SearchResult[]> {
+  if (page > 1) return []; // keep DuckDuckGo to page 1 (it blocks fast)
   const res = await fetch('https://html.duckduckgo.com/html/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA, Accept: 'text/html' },
@@ -125,15 +127,15 @@ async function duckduckgo(query: string, max: number): Promise<SearchResult[]> {
   return parseDuckDuckGoHtml(html).slice(0, max);
 }
 
-const engines: Record<string, (q: string, n: number) => Promise<SearchResult[]>> = { tavily, serper, duckduckgo };
+const engines: Record<string, (q: string, n: number, page?: number) => Promise<SearchResult[]>> = { tavily, serper, duckduckgo };
 
 /** Run one query through the first provider that works. */
-export async function webSearch(query: string, max = 10): Promise<{ results: SearchResult[]; engine: string; errors: string[] }> {
+export async function webSearch(query: string, max = 10, page = 1): Promise<{ results: SearchResult[]; engine: string; errors: string[] }> {
   const errors: string[] = [];
   for (const name of searchProviderNames()) {
     if ((disabledUntil[name] || 0) > Date.now()) continue;
     try {
-      const results = (await engines[name](query, max)).filter(r => r.url);
+      const results = (await engines[name](query, max, page)).filter(r => r.url);
       if (results.length) return { results, engine: name, errors };
       errors.push(`${name}: 0 results`);
     } catch (e: any) {

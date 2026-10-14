@@ -7,7 +7,9 @@ import {
   AgentJob,
   HealthInfo,
   InvestorFitScore,
-  EmailSequenceStep
+  EmailSequenceStep,
+  Campaign,
+  AutomationStatus
 } from '../types';
 
 const PW_KEY = 'safecart_agent_password';
@@ -60,7 +62,8 @@ export const api = {
   health: () => call<HealthInfo>('GET', '/api/health'),
 
   loadState: () => call<{ startup: StartupProfile | null; investors: Investor[]; settings: AppSettings | null; updatedAt: string }>('GET', '/api/state'),
-  saveState: (state: { startup?: StartupProfile; investors?: Investor[]; settings?: AppSettings }) => call<{ ok: boolean }>('PUT', '/api/state', state),
+  saveState: (state: { startup?: StartupProfile; investors?: Investor[]; settings?: AppSettings; deletedIds?: string[]; clearAll?: boolean }) =>
+    call<{ ok: boolean }>('PUT', '/api/state', state),
 
   analyzeProduct: (startup: StartupProfile, settings: AppSettings) =>
     call<{ intel: Partial<StartupProfile> }>('POST', '/api/product/analyze', { startup, settings }),
@@ -84,8 +87,22 @@ export const api = {
 
   findLinkedIn: (name: string, firm: string) => call<{ linkedin: string }>('POST', '/api/linkedin/find', { name, firm }),
 
-  sendEmail: (to: string, subject: string, body: string, replyTo?: string) =>
-    call<{ ok: boolean; error?: string }>('POST', '/api/email/send', { to, subject, body, replyTo }),
+  researchInvestor: (startup: StartupProfile, investor: Investor, settings: AppSettings) =>
+    call<{ investor: Investor }>('POST', '/api/research-investor', { startup, investor, settings }),
+
+  // big runs
+  getCampaign: () => call<{ campaign: Campaign | null }>('GET', '/api/campaign'),
+  startCampaign: (startup: StartupProfile, settings: AppSettings, target: number, mode: 'quick' | 'deep') =>
+    call<{ campaign: Campaign | null }>('POST', '/api/campaign/start', { startup, settings, target, mode }),
+  pauseCampaign: () => call<{ ok: boolean; campaign: Campaign | null }>('POST', '/api/campaign/pause'),
+  resumeCampaign: () => call<{ ok: boolean; campaign: Campaign | null }>('POST', '/api/campaign/resume'),
+
+  // automatic outreach
+  automationStatus: () => call<AutomationStatus>('GET', '/api/automation/status'),
+  runAutomation: () => call<AutomationStatus>('POST', '/api/automation/run'),
+
+  sendEmail: (to: string, subject: string, body: string, replyTo?: string, fromName?: string) =>
+    call<{ ok: boolean; error?: string }>('POST', '/api/email/send', { to, subject, body, replyTo, fromName }),
 
   runAgent: (startup: StartupProfile, settings: AppSettings, investors: Investor[], refreshProduct = false) =>
     call<{ jobId: string }>('POST', '/api/agent/run', { startup, settings, existing: existingOf(investors), refreshProduct }),

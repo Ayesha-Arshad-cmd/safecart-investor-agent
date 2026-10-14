@@ -196,15 +196,19 @@ export async function chat(
   }
 
   const errors: string[] = [];
-  // Two passes: second pass waits for cool-downs instead of skipping.
-  for (let pass = 0; pass < 2; pass++) {
-    for (const p of list) {
+  // Free tiers hit per-minute limits often. Instead of giving up after one round,
+  // keep cycling providers for up to ~3 minutes, waiting for the earliest cool-down.
+  const COOLDOWN_MS = Number(env('AI_COOLDOWN_MS') || 15000);
+  const deadline = Date.now() + Number(env('AI_MAX_WAIT_MS') || 180000);
+  for (let pass = 0; pass < 8 && Date.now() < deadline; pass++) {
+    if (pass > 0) {
       const now = Date.now();
-      if (p.cooldownUntil > now) {
-        if (pass === 0) continue;
-        const wait = Math.min(p.cooldownUntil - now, 65000);
-        await sleep(wait);
-      }
+      const soonest = Math.min(...list.map(p => Math.max(p.cooldownUntil, now)));
+      const wait = Math.min(Math.max(soonest - now, Math.min(5000, COOLDOWN_MS)), 60000, Math.max(deadline - now, 0));
+      if (wait > 0) await sleep(wait);
+    }
+    for (const p of list) {
+      if (p.cooldownUntil > Date.now()) continue;
       const models = await ensureModels(p);
       if (!models.length) {
         errors.push(`${p.name}: no usable model`);
@@ -235,14 +239,20 @@ export async function chat(
           if (res.status === 429 || res.status === 503 || res.status === 529) {
             const retryAfter = Number(res.headers.get('retry-after')) || 0;
             const txt = await res.text().catch(() => '');
-            errors.push(`${p.name}/${model}: ${res.status} rate limited`);
-            // daily quota exhausted → long cooldown on this model; per-minute → short
-            const daily = /per.?day|daily|PerDay|quota/i.test(txt) && !/per.?minute|PerMinute/i.test(txt);
-            if (daily) {
-              p.modelIndex = (p.modelIndex + 1) % models.length; // try next model next time
+            errors.push(`${p.name}/${model}: ${res.status} ${res.status === 429 ? 'rate limited' : 'busy'}`);
+            // server busy (503/529) → just try this provider's next model
+            if (res.status !== 429) {
+              if (attempt === models.length - 1) p.cooldownUntil = Date.now() + COOLDOWN_MS;
               continue;
             }
-            p.cooldownUntil = Date.now() + Math.max(retryAfter * 1000, 20000);
+            // daily quota exhausted → move to the next model; per-minute → short cool-down
+            const daily = /per.?day|daily|PerDay|RPD|TPD/i.test(txt) && !/per.?minute|PerMinute|RPM|TPM/i.test(txt);
+            if (daily) {
+              p.modelIndex = (p.modelIndex + 1) % models.length;
+              if (attempt === models.length - 1) p.cooldownUntil = Date.now() + 10 * 60000;
+              continue;
+            }
+            p.cooldownUntil = Date.now() + Math.min(Math.max(retryAfter * 1000, COOLDOWN_MS), 60000);
             break; // go to next provider
           }
           if (res.status === 404 || res.status === 400) {

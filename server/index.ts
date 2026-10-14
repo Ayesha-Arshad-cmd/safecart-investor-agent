@@ -11,7 +11,9 @@ import crypto from 'node:crypto';
 import { aiConfigured, aiProviderNames } from './ai';
 import { searchProviderNames, webSearch } from './search';
 import { emailProvider, sendEmail } from './email';
-import { loadState, saveState, storageInfo, flushNow } from './store';
+import { loadState, saveState, storageInfo, flushNow, mergeInvestors, clearInvestors } from './store';
+import { startCampaign, getCampaign, pauseCampaign, resumeCampaign, resumeOnBoot } from './campaign';
+import { startAutomation, runAutomationNow, automationStatus } from './automation';
 import {
   analyzeProduct,
   discoverCandidates,
@@ -25,6 +27,7 @@ import {
   cancelJob,
   defaultQueries
 } from './agent';
+import { investorToCandidate } from './agent';
 import type { HealthInfo } from '../src/types';
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -115,12 +118,52 @@ route('GET', '/api/health', (): HealthInfo => ({
   passwordRequired: Boolean(PASSWORD)
 }));
 
-route('GET', '/api/state', () => loadState());
+route('GET', '/api/state', () => {
+  const s = loadState();
+  return { startup: s.startup, investors: s.investors, settings: s.settings, updatedAt: s.updatedAt };
+});
 route('PUT', '/api/state', body => {
   need(body && typeof body === 'object', 'body required');
-  const s = saveState({ startup: body.startup, investors: Array.isArray(body.investors) ? body.investors : undefined, settings: body.settings });
+  // investors are MERGED (newest copy of each wins) so background jobs and the browser never overwrite each other
+  if (body.clearAll) clearInvestors();
+  if (Array.isArray(body.investors) || Array.isArray(body.deletedIds)) {
+    mergeInvestors(Array.isArray(body.investors) ? body.investors : [], Array.isArray(body.deletedIds) ? body.deletedIds : []);
+  }
+  const s = saveState({ startup: body.startup, settings: body.settings });
   return { ok: true, updatedAt: s.updatedAt };
 });
+
+// ---- big runs (100-200+ investors, resumable)
+route('GET', '/api/campaign', () => ({ campaign: getCampaign() }));
+route('POST', '/api/campaign/start', body => {
+  need(body.startup?.name, 'startup required');
+  startCampaign(body.startup, body.settings || {}, { target: Number(body.target) || 100, mode: body.mode === 'quick' ? 'quick' : 'deep' });
+  return { campaign: getCampaign() };
+});
+route('POST', '/api/campaign/pause', () => ({ ok: pauseCampaign(), campaign: getCampaign() }));
+route('POST', '/api/campaign/resume', () => ({ ok: resumeCampaign(), campaign: getCampaign() }));
+
+// ---- upgrade a quick-scanned investor to full research (keeps the same record)
+route('POST', '/api/research-investor', async body => {
+  need(body.startup?.name && body.investor?.id, 'startup and investor required');
+  const inv = await researchCandidate(body.startup, investorToCandidate(body.investor), body.settings);
+  inv.id = body.investor.id;
+  inv.createdAt = body.investor.createdAt || inv.createdAt;
+  inv.quickScore = body.investor.quickScore;
+  inv.campaignId = body.investor.campaignId;
+  const o = body.investor.outreach || {};
+  const keep: any = {};
+  for (const k of ['linkedinRequestSentAt', 'linkedinAcceptedAt', 'linkedinMessagedAt', 'autoPaused', 'responseNotes', 'replyDate']) if (o[k]) keep[k] = o[k];
+  if (['contacted', 'replied', 'meeting', 'diligence', 'passed'].includes(o.status)) Object.assign(keep, { status: o.status });
+  inv.outreach = { ...inv.outreach, ...keep };
+  inv.updatedAt = new Date().toISOString();
+  mergeInvestors([inv]);
+  return { investor: inv };
+});
+
+// ---- automatic outreach
+route('GET', '/api/automation/status', async () => await automationStatus());
+route('POST', '/api/automation/run', async () => await runAutomationNow());
 
 route('POST', '/api/product/analyze', async body => {
   need(body.startup?.name, 'startup required');
@@ -170,7 +213,7 @@ route('POST', '/api/search/raw', async body => {
 
 route('POST', '/api/email/send', async body => {
   need(body.to && body.subject && body.body, 'to, subject and body required');
-  return await sendEmail(String(body.to), String(body.subject), String(body.body), body.replyTo);
+  return await sendEmail(String(body.to), String(body.subject), String(body.body), body.replyTo, body.fromName);
 });
 
 route('POST', '/api/agent/run', body => {
@@ -226,6 +269,8 @@ server.requestTimeout = 0; // research calls can take a while
 server.headersTimeout = 65000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`SafeCart Kids Investor Agent on :${PORT}`);
+  startAutomation();
+  resumeOnBoot();
   console.log(`  AI providers:     ${aiProviderNames().join(', ') || 'NONE — set GEMINI_API_KEY or GROQ_API_KEY'}`);
   console.log(`  Search providers: ${searchProviderNames().join(', ')}`);
   console.log(`  Email:            ${emailProvider()}`);

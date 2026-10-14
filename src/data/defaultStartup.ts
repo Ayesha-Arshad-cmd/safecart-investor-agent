@@ -45,11 +45,19 @@ export const DEFAULT_STARTUP: StartupProfile = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  leadsPerRun: 10,
+  leadsPerRun: 100,
   minFitScoreToKeep: 40,
   geographyFocus: 'United States (bonus: Arizona / Southwest)',
   lookupLinkedInProfiles: true,
   includeLocalAngelGroups: true,
   senderName: '',
-  senderEmail: ''
+  senderEmail: '',
+  deepResearchMinScore: 50,
+  deepResearchPerRun: 40,
+  autoEmailEnabled: false,
+  autoEmailMinScore: 50,
+  dailyEmailLimit: 25,
+  emailHoldMinutes: 60,
+  companyAddress: '',
+  linkedinDailyLimit: 20
 };
