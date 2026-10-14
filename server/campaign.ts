@@ -17,10 +17,12 @@ import {
   quickScoreCandidates,
   generateSearchQueries,
   candidateToQuickInvestor,
-  researchCandidate
+  researchCandidate,
+  investorToCandidate,
+  EMAIL_SEARCH_V
 } from './agent';
 import { loadState, saveState, mergeInvestors } from './store';
-import type { Campaign, CampaignCandidate, StartupProfile, AppSettings, PipelineExecutionLog } from '../src/types';
+import type { Campaign, CampaignCandidate, StartupProfile, AppSettings, PipelineExecutionLog, Investor } from '../src/types';
 
 const PACE_MS = () => Number(process.env.AGENT_PACE_MS || 8000);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -35,7 +37,8 @@ function save(c: Campaign) {
     quick: c.candidates.filter(x => x.stage === 'quick' || x.stage === 'researched').length,
     researched: c.candidates.filter(x => x.stage === 'researched').length,
     skipped: c.candidates.filter(x => x.stage === 'skipped').length,
-    failed: c.candidates.filter(x => x.stage === 'failed').length
+    failed: c.candidates.filter(x => x.stage === 'failed').length,
+    withEmail: c.candidates.filter(x => x.stage === 'researched' && x.hasEmail).length
   };
   saveState({ campaign: c });
 }
@@ -51,7 +54,7 @@ export function getCampaign(): Campaign | null {
   const c = loadState().campaign as Campaign | null | undefined;
   if (!c) return null;
   // the list of candidates can be long — the UI only needs counts + logs
-  return { ...c, candidates: [] as CampaignCandidate[] };
+  return { ...c, candidates: [] as CampaignCandidate[], spare: undefined };
 }
 
 export function startCampaign(startup: StartupProfile, settings: AppSettings, opts: { target: number; mode: 'quick' | 'deep' }): Campaign {
@@ -59,7 +62,7 @@ export function startCampaign(startup: StartupProfile, settings: AppSettings, op
   const cur = st.campaign as Campaign | undefined;
   if (cur && cur.status === 'running' && worker) return cur;
   // people the last run found but didn't need (it stopped at its target) start this run
-  const leftovers = (cur?.candidates || [])
+  const leftovers = [...(cur?.candidates || []), ...(cur?.spare || [])]
     .filter(x => x.stage === 'found')
     .map(x => ({ ...x, attempts: 0 }))
     .slice(0, 300);
@@ -81,6 +84,52 @@ export function startCampaign(startup: StartupProfile, settings: AppSettings, op
   saveState({ campaign: c, startup, settings });
   ensureWorker();
   return c;
+}
+
+/**
+ * "Research the ones I already have": deep-research quick-scanned investors (best score first),
+ * then re-check deep-researched ones that have no email yet with the newer email finder.
+ */
+export function startUpgrade(startup: StartupProfile, settings: AppSettings, count: number): { campaign: Campaign | null; available: number } {
+  const st = loadState();
+  const cur = st.campaign as Campaign | undefined;
+  if (cur && cur.status === 'running' && worker) return { campaign: cur, available: 0 };
+  const byScore = (a: Investor, b: Investor) => (b.fitScore?.total || 0) - (a.fitScore?.total || 0);
+  const quick = st.investors.filter((i: Investor) => i.researchDepth === 'quick' && !['passed'].includes(i.outreach?.status)).sort(byScore);
+  const recheck = st.investors
+    .filter((i: Investor) => i.researchDepth !== 'quick' && !i.email && (i.emailSearchV || 0) < EMAIL_SEARCH_V && !['replied', 'meeting', 'diligence', 'passed'].includes(i.outreach?.status))
+    .sort(byScore);
+  const pool = [...quick, ...recheck];
+  const n = Math.max(1, Math.min(200, Math.round(count || 20)));
+  const picked = pool.slice(0, n);
+  if (!picked.length) return { campaign: null, available: 0 };
+  const spare = [...(cur?.candidates || []), ...(cur?.spare || [])].filter(x => x.stage === 'found').slice(0, 300);
+  const c: Campaign & { startup?: StartupProfile; settings?: AppSettings } = {
+    id: uid('run'),
+    status: 'running',
+    target: picked.length,
+    mode: 'upgrade',
+    startedAt: new Date().toISOString(),
+    phase: 'deep',
+    queries: [],
+    queryCursor: 0,
+    candidates: picked.map((i: Investor) => ({
+      ...investorToCandidate(i),
+      stage: 'quick' as const,
+      quickScore: i.fitScore?.total || 0,
+      investorId: i.id,
+      attempts: 0,
+      force: i.researchDepth !== 'quick'
+    })),
+    spare,
+    logs: []
+  };
+  c.startup = startup;
+  c.settings = settings;
+  logTo(c)('research', `Researching ${picked.length} investors you already have (${picked.filter(i => i.researchDepth === 'quick').length} quick-scanned, ${picked.filter(i => i.researchDepth !== 'quick').length} email re-checks). ${pool.length - picked.length} more left after this.`, 'success');
+  save(c);
+  ensureWorker();
+  return { campaign: c, available: pool.length };
 }
 
 export function pauseCampaign(): boolean {
@@ -286,13 +335,14 @@ async function runWorker() {
 
     // ---------------- 5. deep research for the best ones
     if (c.phase === 'deep') {
-      const minDeep = settings.deepResearchMinScore ?? 50;
-      const limit = Math.max(1, settings.deepResearchPerRun ?? 40);
+      const upgrade = c.mode === 'upgrade';
+      const minDeep = upgrade ? 0 : settings.deepResearchMinScore ?? 50;
+      const limit = upgrade ? c.target : Math.max(1, settings.deepResearchPerRun ?? 40);
       const queue = c.candidates
         .filter(x => x.stage === 'quick' && (x.quickScore || 0) >= minDeep)
         .sort((a, b) => (b.quickScore || 0) - (a.quickScore || 0))
         .slice(0, limit);
-      if (queue.length) log('research', `Deep research for the top ${queue.length} (score ${minDeep}+). This is the slow part on free AI plans — leave it running.`);
+      if (queue.length && !upgrade) log('research', `Deep research for the top ${queue.length} (score ${minDeep}+). This is the slow part on free AI plans — leave it running.`);
       for (let pass = 0; pass < 2 && alive(); pass++) {
         for (const cand of queue) {
           if (!alive()) return;
@@ -303,7 +353,7 @@ async function runWorker() {
             cand.stage = 'skipped'; // user deleted it
             continue;
           }
-          if (existing?.researchDepth === 'deep') {
+          if (existing?.researchDepth === 'deep' && !cand.force) {
             cand.stage = 'researched';
             continue;
           }
@@ -322,6 +372,7 @@ async function runWorker() {
             mergeInvestors([inv]);
             cand.investorId = inv.id;
             cand.stage = 'researched';
+            cand.hasEmail = !!inv.email;
             log('score', `Fit ${inv.fitScore.total}/100 (${inv.fitScore.status.toUpperCase()})${inv.email ? ` · email found` : ''}`, 'success', cand.name);
           } catch (e: any) {
             const msg = String(e?.message || e);
@@ -346,7 +397,10 @@ async function runWorker() {
       c.status = 'done';
       c.finishedAt = new Date().toISOString();
       const k = c.counts || ({} as any);
-      log('crm', `Run finished — ${c.candidates.filter(x => x.stage === 'quick' || x.stage === 'researched').length} investors added (${c.candidates.filter(x => x.stage === 'researched').length} deeply researched). Start another run to find the next batch.`, 'success');
+      if (c.mode === 'upgrade') {
+        const done = c.candidates.filter(x => x.stage === 'researched');
+        log('crm', `Finished — researched ${done.length}; ${done.filter(x => x.hasEmail).length} now have an email. The rest: use LinkedIn or their website's contact form.`, 'success');
+      } else log('crm', `Run finished — ${c.candidates.filter(x => x.stage === 'quick' || x.stage === 'researched').length} investors added (${c.candidates.filter(x => x.stage === 'researched').length} deeply researched). Start another run to find the next batch.`, 'success');
       save(c);
       void k;
     }

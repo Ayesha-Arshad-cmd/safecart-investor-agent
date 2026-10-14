@@ -84,6 +84,8 @@ export interface Investor {
   linkedinMessage?: string;
   /** 'quick' = scored from search results only; 'deep' = website researched + outreach written. */
   researchDepth?: 'quick' | 'deep';
+  /** version of the email finder that last looked for this investor's email */
+  emailSearchV?: number;
   /** Search-snippet score from the quick scan (0-100). */
   quickScore?: number;
   /** Campaign run that found this investor. */
@@ -191,13 +193,16 @@ export interface CampaignCandidate extends DiscoveryCandidate {
   quickReason?: string;
   investorId?: string;
   attempts?: number;
+  /** re-research even if already deep-researched (email re-check) */
+  force?: boolean;
+  hasEmail?: boolean;
 }
 
 export interface Campaign {
   id: string;
   status: 'running' | 'paused' | 'done' | 'error';
   target: number;
-  mode: 'quick' | 'deep';
+  mode: 'quick' | 'deep' | 'upgrade';
   startedAt: string;
   finishedAt?: string;
   phase: 'queries' | 'search' | 'extract' | 'quick' | 'deep' | 'done';
@@ -206,7 +211,9 @@ export interface Campaign {
   candidates: CampaignCandidate[];
   logs: PipelineExecutionLog[];
   error?: string;
-  counts?: { found: number; quick: number; researched: number; skipped: number; failed: number };
+  counts?: { found: number; quick: number; researched: number; skipped: number; failed: number; withEmail?: number };
+  /** people found but not needed yet — the next run starts with them */
+  spare?: CampaignCandidate[];
 }
 
 export interface AutomationStatus {

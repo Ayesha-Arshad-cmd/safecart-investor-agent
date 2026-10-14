@@ -94,6 +94,8 @@ export const api = {
   getCampaign: () => call<{ campaign: Campaign | null }>('GET', '/api/campaign'),
   startCampaign: (startup: StartupProfile, settings: AppSettings, target: number, mode: 'quick' | 'deep') =>
     call<{ campaign: Campaign | null }>('POST', '/api/campaign/start', { startup, settings, target, mode }),
+  upgradeCampaign: (startup: StartupProfile, settings: AppSettings, count: number) =>
+    call<{ campaign: Campaign | null; available: number }>('POST', '/api/campaign/upgrade', { startup, settings, count }),
   pauseCampaign: () => call<{ ok: boolean; campaign: Campaign | null }>('POST', '/api/campaign/pause'),
   resumeCampaign: () => call<{ ok: boolean; campaign: Campaign | null }>('POST', '/api/campaign/resume'),
 

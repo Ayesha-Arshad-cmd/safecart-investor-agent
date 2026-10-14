@@ -30,13 +30,14 @@ const PHASE_LABEL: Record<Campaign['phase'], string> = {
   search: 'Searching the web & LinkedIn',
   extract: 'Picking out investors',
   quick: 'Quick-scoring',
-  deep: 'Deep research on the best ones',
+  deep: 'Deep research',
   done: 'Finished'
 };
 
 function progressOf(c: Campaign): number {
   const k = c.counts || { found: 0, quick: 0, researched: 0, skipped: 0, failed: 0 };
   if (c.status === 'done') return 100;
+  if (c.mode === 'upgrade') return Math.min(99, Math.round(((k.researched + k.failed) / Math.max(1, k.found)) * 100));
   if (c.phase === 'queries') return 2;
   if (c.phase === 'search' || c.phase === 'extract') return Math.min(35, Math.round((k.found / Math.max(1, c.target * 1.3)) * 35));
   if (c.phase === 'quick') {
@@ -50,7 +51,7 @@ function progressOf(c: Campaign): number {
 export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startup, settings, existingInvestors, onRefresh, onStartupIntel, onCompletePipeline }) => {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [target, setTarget] = useState(settings.leadsPerRun || 100);
-  const [mode, setMode] = useState<'deep' | 'quick'>('deep');
+  const [mode, setMode] = useState<'deep' | 'quick' | 'upgrade'>('deep');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -116,6 +117,13 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
         s = { ...s, ...intel };
         onStartupIntel(intel);
       }
+      if (mode === 'upgrade') {
+        const r = await api.upgradeCampaign(s, settings, target);
+        if (!r.campaign) throw new Error('Nothing to research — every investor in your list is already fully researched.');
+        setCampaign(r.campaign);
+        setShowForm(false);
+        return;
+      }
       const { campaign: c } = await api.startCampaign(s, { ...settings, leadsPerRun: target }, target, mode);
       setCampaign(c);
       setShowForm(false);
@@ -138,6 +146,22 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
   const running = campaign?.status === 'running';
   const k = campaign?.counts || { found: 0, quick: 0, researched: 0, skipped: 0, failed: 0 };
   const pct = campaign ? progressOf(campaign) : 0;
+  const quickCount = existingInvestors.filter(i => i.researchDepth === 'quick').length;
+  const noEmailCount = existingInvestors.filter(i => i.researchDepth !== 'quick' && !i.email && (i.emailSearchV || 0) < 2).length;
+  const stats: [string, number][] =
+    campaign?.mode === 'upgrade'
+      ? [
+          ['To research', k.found],
+          ['Researched', k.researched],
+          ['Email found', k.withEmail || 0],
+          ['Failed', k.failed]
+        ]
+      : [
+          ['Found', k.found],
+          ['Added to list', k.quick],
+          ['Deep researched', k.researched],
+          ['Skipped (weak)', k.skipped]
+        ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/30 backdrop-blur-sm overflow-y-auto">
@@ -158,17 +182,19 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
           <div className="my-5 space-y-4 text-sm">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">How many investors this run?</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  {mode === 'upgrade' ? 'How many to research?' : 'How many investors this run?'}
+                </label>
                 <input
                   type="number"
-                  min={10}
+                  min={mode === 'upgrade' ? 1 : 10}
                   max={300}
                   value={target}
-                  onChange={e => setTarget(Math.max(10, Math.min(300, Number(e.target.value) || 10)))}
+                  onChange={e => setTarget(Math.max(mode === 'upgrade' ? 1 : 10, Math.min(300, Number(e.target.value) || 10)))}
                   className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus:border-emerald-500"
                 />
                 <div className="flex gap-1 mt-1.5">
-                  {[50, 100, 150, 200].map(n => (
+                  {(mode === 'upgrade' ? [10, 20, 40, 60] : [50, 100, 150, 200]).map(n => (
                     <button
                       key={n}
                       onClick={() => setTarget(n)}
@@ -196,10 +222,29 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
                     <span className="block text-xs text-slate-500">Fastest. Research any of them later from their profile.</span>
                   </span>
                 </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    className="mt-1"
+                    checked={mode === 'upgrade'}
+                    onChange={() => {
+                      setMode('upgrade');
+                      setTarget(20);
+                    }}
+                  />
+                  <span>
+                    <span className="font-medium text-slate-900">Research the ones I already have (find emails)</span>
+                    <span className="block text-xs text-slate-500">
+                      No new searching. Best scores first: {quickCount} quick-scanned{noEmailCount ? ` + ${noEmailCount} to re-check for an email` : ''}.
+                    </span>
+                  </span>
+                </label>
               </div>
             </div>
             <p className="text-xs text-slate-500">
-              Each run skips investors already in your list and searches already used, so the next run finds new people. You have {existingInvestors.length} so far.
+              {mode === 'upgrade'
+                ? 'Each one takes about a minute on free AI plans. You can close this window — it keeps going on the server.'
+                : <>Each run skips investors already in your list and searches already used, so the next run finds new people. You have {existingInvestors.length} so far.</>}
             </p>
             <div className="flex justify-end gap-2">
               {campaign && campaign.status !== 'done' && (
@@ -220,12 +265,7 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
         ) : campaign ? (
           <div className="my-5 space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-              {[
-                ['Found', k.found],
-                ['Added to list', k.quick],
-                ['Deep researched', k.researched],
-                ['Skipped (weak)', k.skipped]
-              ].map(([l, v]) => (
+              {stats.map(([l, v]) => (
                 <div key={l as string} className="rounded-lg border border-slate-200 p-2.5">
                   <div className="text-xl font-semibold text-slate-900">{v as number}</div>
                   <div className="text-xs text-slate-500">{l}</div>
@@ -280,7 +320,7 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
                 )}
                 {!running && (
                   <button onClick={() => setShowForm(true)} className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 flex items-center gap-1.5 text-sm cursor-pointer">
-                    <RotateCw className="w-4 h-4" /> Start next run
+                    <RotateCw className="w-4 h-4" /> {campaign.mode === 'upgrade' ? 'New run' : 'Start next run'}
                   </button>
                 )}
               </div>

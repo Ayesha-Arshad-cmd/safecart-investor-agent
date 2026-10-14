@@ -10,7 +10,7 @@
  */
 import { chatJson } from './ai';
 import { webSearch, SearchResult, isLinkedInProfile, normalizeLinkedInUrl } from './search';
-import { readPage, pickUsefulSubpages, canFetch, PageContent } from './reader';
+import { readPage, pickUsefulSubpages, canFetch, extractEmails, PageContent } from './reader';
 import type {
   StartupProfile,
   AppSettings,
@@ -386,6 +386,51 @@ function normalizeFit(f: any): InvestorFitScore {
   };
 }
 
+function siteRootOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '').split('.').slice(-2).join('.');
+  } catch {
+    return '';
+  }
+}
+
+/** Does this domain look like it belongs to the firm (or the person)? e.g. "brightkids.vc" ↔ "BrightKids Capital". */
+export function siteMatchesFirm(root: string, firm: string, person: string): boolean {
+  const label = (root.split('.')[0] || '').toLowerCase();
+  if (label.length < 3) return false;
+  const words = `${firm} ${person}`.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !/^(capital|ventures?|partners?|fund|group|angels?|investors?|independent|holdings|management|the)$/.test(w));
+  const squashed = (firm || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return words.some(w => label.includes(w)) || (squashed.length >= 4 && squashed.includes(label));
+}
+
+/** Bump when the email finder improves, so older investors can be re-checked. */
+export const EMAIL_SEARCH_V = 2;
+
+const BAD_INBOX = /^(no-?reply|donotreply|privacy|legal|careers?|jobs|recruit|press|media|pr|unsubscribe|abuse|webmaster|billing|accounts?|admin|support|help|security|dpo|gdpr)[@.+-]/;
+const GOOD_INBOX = /^(invest|investments|investors|pitch|pitches|deals?|dealflow|deal-flow|founders?|startups?|apply|partners?|team|hello|hi|info|contact|ventures?|office)[@.+-]/;
+
+/** Best published email on the investor's own domain: their personal one first, then a deal-flow / general inbox. */
+export function bestEmail(list: string[], personName: string, siteRoot: string): string {
+  if (!siteRoot) return '';
+  const own = list.filter(e => {
+    const d = e.split('@')[1] || '';
+    return (d === siteRoot || d.endsWith('.' + siteRoot)) && !BAD_INBOX.test(e);
+  });
+  if (!own.length) return '';
+  const parts = personName.toLowerCase().split(/\s+/).map(x => x.replace(/[^a-z]/g, '')).filter(x => x.length > 1);
+  const personal = own.find(e => {
+    const local = e.split('@')[0].replace(/[^a-z]/g, '');
+    return parts.some(p => local.includes(p)) || (parts.length > 1 && local === parts[0][0] + parts[parts.length - 1]);
+  });
+  if (personal) return personal;
+  const ranked = own.filter(e => GOOD_INBOX.test(e));
+  const order = (e: string) => {
+    const k = e.split('@')[0];
+    return /invest|pitch|deal|founder|startup|apply/.test(k) ? 0 : /partner|team|ventures/.test(k) ? 1 : 2;
+  };
+  return ranked.sort((a, b) => order(a) - order(b))[0] || '';
+}
+
 function normalizeSequence(seq: any): EmailSequenceStep[] {
   const delays = [0, 4, 10, 21];
   return (Array.isArray(seq) ? seq : []).slice(0, 4).map((x: any, i: number) => ({
@@ -441,18 +486,48 @@ export async function researchCandidate(
       crawl = { title: home.title, description: home.description, excerpt: home.text.slice(0, 1500), url: home.url };
       home.emails.forEach(e => emails.add(e));
       evidence.push(`WEBSITE ${home.url} — ${home.title}\n${home.description}\n${home.text}`);
-      for (const sub of pickUsefulSubpages(home, 2)) {
+      const subs = pickUsefulSubpages(home, 3);
+      // no contact link on the home page? most sites still have /contact
+      if (!home.emails.length && !subs.some(u => /contact/i.test(u))) {
+        try {
+          subs.push(new URL('/contact', home.url).toString());
+        } catch {
+          /* ignore */
+        }
+      }
+      for (const sub of subs) {
         const p = await readPage(sub, 4000);
         if (p.text) {
           sources.add(p.url);
           p.emails.forEach(e => emails.add(e));
-          evidence.push(`PAGE ${p.url}\n${p.text}`);
+          evidence.push(`PAGE ${p.url}\n${p.text.slice(0, 3000)}`);
         }
       }
       log('research', `Read ${website.replace(/^https?:\/\//, '').slice(0, 50)} (${home.via})`, 'info', who);
     } else {
       log('research', `Could not read ${website}`, 'warn', who);
     }
+  }
+
+  // Still nothing on their site? One search for emails published elsewhere on the web
+  // (press pages, directories, event pages) — kept only if it's on the firm's own domain.
+  const root = siteRootOf(website);
+  const trustedSite = !!c.websiteUrl || siteMatchesFirm(root, c.firm, c.name);
+  const webEmails = new Set<string>();
+  if (root && trustedSite && ![...emails].some(e => e.endsWith('@' + root) || e.endsWith('.' + root))) {
+    const firstLast = c.name.split(/\s+/).filter(Boolean);
+    const q = `"@${root}"${firstLast.length > 1 ? ` OR "${firstLast[0]}" "${firstLast[firstLast.length - 1]}" email` : ''}`;
+    const { results } = await webSearch(q, 8).catch(() => ({ results: [] as SearchResult[] }));
+    for (const r of results) {
+      for (const e of extractEmails(`${r.title} ${r.snippet}`)) {
+        if (e.endsWith('@' + root) || e.endsWith('.' + root)) {
+          webEmails.add(e);
+          emails.add(e);
+          evidence.push(`SEARCH (${r.url}): ${r.title} — ${r.snippet}`);
+        }
+      }
+    }
+    if (webEmails.size) log('research', `Found a published email on the web for ${root}`, 'info', who);
   }
 
   const evidenceText = evidence.join('\n\n---\n\n').slice(0, 9000);
@@ -511,12 +586,15 @@ Scoring guide: 80+ = clear thesis + stage match for a kids/family consumer app; 
   })();
   const emailDomain = email.split('@')[1] || '';
   const domainOk = /^(gmail|googlemail|outlook|hotmail|icloud|yahoo|proton|protonmail)\./.test(emailDomain) || (!!siteRoot && emailDomain.endsWith(siteRoot));
-  const verifiedEmail = email && emailList.includes(email) && domainOk ? email : '';
+  const aiPick = email && emailList.includes(email) && domainOk && !(webEmails.has(email) && !emailDomain.endsWith(siteRoot)) ? email : '';
+  // The AI sometimes skips a perfectly good firm inbox — pick the best published one ourselves.
+  const verifiedEmail = aiPick || (trustedSite ? bestEmail(emailList, c.name, siteRoot) : '');
   const portfolio = arr(p.portfolio, 25);
   const now = new Date().toISOString();
 
   return {
     id: uid('inv'),
+    emailSearchV: EMAIL_SEARCH_V,
     name: c.name,
     title: str(p.title, 120) || c.title || 'Investor',
     firm: str(p.firm, 120) || c.firm,

@@ -196,7 +196,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
     try {
       const { investor } = await api.researchInvestor(startup, selected, settings);
       onUpdateInvestor(investor, true);
-      showToast(`${investor.name} researched — fit ${investor.fitScore.total}/100`);
+      showToast(`${investor.name} researched — fit ${investor.fitScore.total}/100${investor.email ? ` · email: ${investor.email}` : ' · still no public email'}`);
     } catch (e: any) {
       showToast(e?.message || 'Research failed', true);
     } finally {
@@ -592,10 +592,40 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
                     </div>
                   </div>
                   {!selected.email && (
-                    <p className="text-xs text-amber-700">
-                      No public email was found for this investor. Use the LinkedIn note above, their website contact form ({selected.website || 'unknown'}), or add an
-                      email in the dossier if you find one.
-                    </p>
+                    <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                      {selected.researchDepth === 'quick' ? (
+                        <p>
+                          <b>Not researched yet</b> — quick-scanned investors haven't had their website checked, so there's no email yet.
+                        </p>
+                      ) : (selected.emailSearchV || 0) < 2 ? (
+                        <p>
+                          <b>Checked with the old email finder.</b> The new one also reads contact pages, hidden emails and the web — look again.
+                        </p>
+                      ) : (
+                        <p>
+                          <b>This investor doesn't publish an email.</b> Many don't. Use the LinkedIn note above
+                          {selected.website ? (
+                            <>
+                              , or the contact / pitch form on{' '}
+                              <a href={selected.website} target="_blank" rel="noreferrer" className="underline">
+                                their website
+                              </a>
+                            </>
+                          ) : null}
+                          . If you find an email yourself, add it in the full dossier.
+                        </p>
+                      )}
+                      {(selected.researchDepth === 'quick' || (selected.emailSearchV || 0) < 2) && (
+                        <button
+                          onClick={researchDeeply}
+                          disabled={researching}
+                          className="px-3 py-1.5 rounded-md bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white font-semibold cursor-pointer"
+                        >
+                          {researching ? 'Looking… (about a minute)' : selected.researchDepth === 'quick' ? 'Research deeply & find email' : 'Look again for an email'}
+                        </button>
+                      )}
+                      <p className="text-amber-700">Tip: to do many at once, click Find investors → "Research the ones I already have".</p>
+                    </div>
                   )}
                 </div>
               ) : (

@@ -12,7 +12,7 @@ import { aiConfigured, aiProviderNames } from './ai';
 import { searchProviderNames, webSearch } from './search';
 import { emailProvider, sendEmail } from './email';
 import { loadState, saveState, storageInfo, flushNow, mergeInvestors, clearInvestors } from './store';
-import { startCampaign, getCampaign, pauseCampaign, resumeCampaign, resumeOnBoot } from './campaign';
+import { startCampaign, startUpgrade, getCampaign, pauseCampaign, resumeCampaign, resumeOnBoot } from './campaign';
 import { startAutomation, runAutomationNow, automationStatus } from './automation';
 import {
   analyzeProduct,
@@ -139,6 +139,11 @@ route('POST', '/api/campaign/start', body => {
   need(body.startup?.name, 'startup required');
   startCampaign(body.startup, body.settings || {}, { target: Number(body.target) || 100, mode: body.mode === 'quick' ? 'quick' : 'deep' });
   return { campaign: getCampaign() };
+});
+route('POST', '/api/campaign/upgrade', body => {
+  need(body.startup?.name, 'startup required');
+  const r = startUpgrade(body.startup, body.settings || {}, Number(body.count) || 20);
+  return { campaign: r.campaign ? getCampaign() : null, available: r.available };
 });
 route('POST', '/api/campaign/pause', () => ({ ok: pauseCampaign(), campaign: getCampaign() }));
 route('POST', '/api/campaign/resume', () => ({ ok: resumeCampaign(), campaign: getCampaign() }));

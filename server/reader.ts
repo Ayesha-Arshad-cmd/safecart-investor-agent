@@ -51,8 +51,36 @@ function decode(s: string): string {
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const JUNK_EMAIL = /(\.png|\.jpg|\.jpeg|\.gif|\.webp|\.svg|example\.com|sentry|wixpress|domain\.com|email\.com|yourname|@2x)/i;
 
+/** Cloudflare hides emails as hex ("data-cfemail" / "/cdn-cgi/l/email-protection#…"). Decode them. */
+export function decodeCloudflareEmails(html: string): string[] {
+  const out: string[] = [];
+  const hexes = [
+    ...[...html.matchAll(/data-cfemail=["']([0-9a-f]{4,})["']/gi)].map(m => m[1]),
+    ...[...html.matchAll(/email-protection#([0-9a-f]{4,})/gi)].map(m => m[1])
+  ];
+  for (const hex of hexes) {
+    try {
+      const key = parseInt(hex.slice(0, 2), 16);
+      let e = '';
+      for (let i = 2; i < hex.length; i += 2) e += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
+      if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(e)) out.push(e);
+    } catch {
+      /* ignore */
+    }
+  }
+  return out;
+}
+
+/** "jane [at] fund [dot] com", "jane(at)fund.com", "jane at fund dot com" → jane@fund.com */
+function unObfuscate(text: string): string {
+  return text
+    .replace(/\s*[\[(<{]\s*at\s*[\])>}]\s*/gi, '@')
+    .replace(/\s*[\[(<{]\s*dot\s*[\])>}]\s*/gi, '.')
+    .replace(/\b([a-z0-9._%+-]+)\s+at\s+([a-z0-9-]+)\s+dot\s+([a-z]{2,})\b/gi, '$1@$2.$3');
+}
+
 export function extractEmails(text: string): string[] {
-  const found = (text.match(EMAIL_RE) || []).map(e => e.toLowerCase().replace(/\.$/, ''));
+  const found = (unObfuscate(text).match(EMAIL_RE) || []).map(e => e.toLowerCase().replace(/\.$/, ''));
   return [...new Set(found.filter(e => !JUNK_EMAIL.test(e)))].slice(0, 10);
 }
 
@@ -94,7 +122,8 @@ export function htmlToContent(html: string, url: string): Omit<PageContent, 'via
     .replace(/\n\s*\n\s*\n+/g, '\n\n')
     .trim();
 
-  return { url, title, description, text: body, emails: extractEmails(mailtos.join(' ') + ' ' + body), links };
+  const hidden = decodeCloudflareEmails(html);
+  return { url, title, description, text: body, emails: extractEmails([...mailtos, ...hidden].join(' ') + ' ' + body), links };
 }
 
 async function viaJina(url: string): Promise<PageContent> {
@@ -139,34 +168,43 @@ export async function readPage(url: string, maxChars = 12000): Promise<PageConte
   return direct!;
 }
 
-/** Pick the most useful sub-pages (portfolio / team / about / thesis / contact) on the same site. */
-export function pickUsefulSubpages(page: PageContent, max = 2): string[] {
+/**
+ * Pick the most useful sub-pages on the same site — one of each kind, in this order:
+ * contact (where emails live), team/people, portfolio, thesis.
+ */
+export function pickUsefulSubpages(page: PageContent, max = 3): string[] {
   let host = '';
   try {
     host = new URL(page.url).hostname.replace(/^www\./, '');
   } catch {
     return [];
   }
-  const score = (l: { href: string; text: string }) => {
-    const s = `${l.href} ${l.text}`.toLowerCase();
-    if (/portfolio|companies|investments/.test(s)) return 5;
-    if (/thesis|focus|approach|what-we-invest|philosophy/.test(s)) return 4;
-    if (/team|people|partners|about/.test(s)) return 3;
-    if (/contact|pitch|submit|apply/.test(s)) return 2;
-    return 0;
-  };
+  const kinds: [string, RegExp][] = [
+    ['contact', /contact|get-in-touch|reach-us|pitch|submit|apply/],
+    ['team', /team|people|partners|about|who-we-are/],
+    ['portfolio', /portfolio|companies|investments/],
+    ['thesis', /thesis|focus|approach|what-we-invest|philosophy/]
+  ];
+  const own = page.links.filter(l => {
+    try {
+      return new URL(l.href).hostname.replace(/^www\./, '') === host;
+    } catch {
+      return false;
+    }
+  });
   const seen = new Set<string>([page.url.replace(/\/$/, '')]);
-  return page.links
-    .filter(l => {
-      try {
-        return new URL(l.href).hostname.replace(/^www\./, '') === host;
-      } catch {
-        return false;
-      }
-    })
-    .map(l => ({ href: l.href.split('#')[0].replace(/\/$/, ''), s: score(l) }))
-    .filter(l => l.s > 0 && !seen.has(l.href) && (seen.add(l.href), true))
-    .sort((a, b) => b.s - a.s)
-    .slice(0, max)
-    .map(l => l.href);
+  const out: string[] = [];
+  for (const [, re] of kinds) {
+    if (out.length >= max) break;
+    const hit = own.find(l => {
+      const href = l.href.split('#')[0].replace(/\/$/, '');
+      return re.test(`${href} ${l.text}`.toLowerCase()) && !seen.has(href);
+    });
+    if (hit) {
+      const href = hit.href.split('#')[0].replace(/\/$/, '');
+      seen.add(href);
+      out.push(href);
+    }
+  }
+  return out;
 }

@@ -28,6 +28,7 @@ const addDays = (iso: string, days: number) => {
 const norm = (s: string) => (s || '').toLowerCase().replace(/[^a-z]/g, '');
 
 let running = false;
+let current: Promise<void> = Promise.resolve();
 let lastGmailRemaining: number | undefined;
 
 function settingsOf(st: any) {
@@ -177,7 +178,13 @@ async function checkInbox(force = false) {
   }
 }
 
-async function tick(forceCheck = false) {
+function tick(forceCheck = false): Promise<void> {
+  if (running) return current;
+  current = doTick(forceCheck);
+  return current;
+}
+
+async function doTick(forceCheck: boolean) {
   if (running) return;
   running = true;
   const a = loadState().automation!;
@@ -204,6 +211,7 @@ export function startAutomation() {
 }
 
 export async function runAutomationNow() {
+  await tick(true); // if a check was already running, wait for it, then run a fresh one
   await tick(true);
   return automationStatus();
 }
