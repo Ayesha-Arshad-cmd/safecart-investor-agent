@@ -9,6 +9,7 @@
  *   runAgentJob                  → does all of it in one click, with a live log
  */
 import { chatJson } from './ai';
+import { Audience, audienceOf, expertQueries, EXPERT_TYPES } from '../src/data/audience';
 import { webSearch, SearchResult, isLinkedInProfile, normalizeLinkedInUrl } from './search';
 import { readPage, pickUsefulSubpages, canFetch, extractEmails, PageContent } from './reader';
 import type {
@@ -40,7 +41,13 @@ const today = () => new Date().toISOString().slice(0, 10);
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const normKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-const INVESTOR_TYPES: InvestorType[] = ['Angel', 'VC Fund', 'Micro-VC', 'Family Office', 'Angel Group', 'Accelerator', 'Corporate VC', 'Other'];
+const INVESTOR_TYPES: InvestorType[] = ['Angel', 'VC Fund', 'Micro-VC', 'Family Office', 'Angel Group', 'Accelerator', 'Corporate VC', 'Other', ...EXPERT_TYPES];
+const isExp = (a?: Audience | string) => a === 'experts';
+/** In the experts list, an investor-only type becomes "Other" (and vice versa stays as is). */
+const expType = (t: InvestorType, exp: boolean): InvestorType =>
+  exp && !(EXPERT_TYPES as readonly string[]).includes(t) && t !== 'Accelerator' ? 'Other' : t;
+const typeList = (a?: Audience | string) =>
+  isExp(a) ? `${EXPERT_TYPES.join(' | ')} | Accelerator | Other` : 'Angel | VC Fund | Micro-VC | Family Office | Angel Group | Accelerator | Corporate VC | Other';
 const STAGES: InvestmentStage[] = ['Pre-seed', 'Seed', 'Series A', 'Growth', 'All Stages', 'Unknown'];
 const asType = (t: any): InvestorType => INVESTOR_TYPES.find(x => x.toLowerCase() === String(t || '').toLowerCase()) || 'Other';
 const asStage = (s: any): InvestmentStage => {
@@ -166,6 +173,10 @@ Return JSON:
 }
 
 export function defaultQueries(s: StartupProfile, settings?: Partial<AppSettings>): { linkedin: string[]; web: string[] } {
+  if (isExp(settings?.audience)) {
+    const city = (s.location || '').split(',').slice(0, 2).map(x => x.trim()).join(' ').trim();
+    return expertQueries((s.investorKeywords || []).slice(0, 5), settings?.includeLocalAngelGroups !== false ? city : '');
+  }
   const kw = (s.investorKeywords?.length ? s.investorKeywords : ['family tech', 'kids fintech', 'edtech', 'parenting', 'child safety']).slice(0, 6);
   const linkedin = s.linkedinSearchQueries?.length
     ? s.linkedinSearchQueries
@@ -175,7 +186,25 @@ export function defaultQueries(s: StartupProfile, settings?: Partial<AppSettings
     const city = s.location.split(',').slice(0, 2).join(' ');
     web.push(`angel investor groups ${city} early stage startups`);
   }
+  // Investors who PUBLISH a pitch email (they want cold emails) — these are the ones we can auto-email.
+  web.push(...emailFriendlyQueries(kw));
   return { linkedin, web };
+}
+
+/** Searches that surface funds / angel groups / accelerators that publish an email for pitches. */
+export function emailFriendlyQueries(kw: string[]): string[] {
+  const k = kw.length ? kw : ['consumer', 'family tech'];
+  const pick = (i: number) => k[i % k.length];
+  return [
+    `"send us your pitch deck" pre-seed fund ${pick(0)}`,
+    `"email your deck" seed investors ${pick(1)}`,
+    `"pitch@" pre-seed venture fund consumer`,
+    `"deals@" seed fund ${pick(2)} startups`,
+    `"submit your deck" "email" angel investors ${pick(3)}`,
+    `pre-seed fund "we read every email" founders ${pick(0)}`,
+    `micro VC "email us" pitch deck consumer apps ${pick(1)}`,
+    `angel network "apply" "email" early stage ${pick(2)}`
+  ];
 }
 
 // ---------------------------------------------------------------- Phase 2
@@ -184,7 +213,7 @@ const noLog: Log = () => {};
 
 const looksLikeList = (r: SearchResult) =>
   !isLinkedInProfile(r.url) &&
-  /(top \d+|\d+ (best|top)|list of|investors (in|for|who)|best .*investors|angel (groups|networks)|directory|vc firms)/i.test(`${r.title} ${r.snippet}`);
+  /(top \d+|\d+ (best|top)|list of|investors (in|for|who)|best .*investors|angel (groups|networks)|directory|vc firms|(best|top) .*(consultants|advisors|experts|coaches|cfos)|consultants (for|who))/i.test(`${r.title} ${r.snippet}`);
 
 export async function runSearches(queries: string[], perQuery = 10, log: Log = noLog): Promise<SearchResult[]> {
   const seen = new Set<string>();
@@ -213,15 +242,17 @@ export async function extractCandidates(
   results: SearchResult[],
   existing: { name: string; firm: string }[],
   log: Log = noLog,
-  maxListPages = 3
+  maxListPages = 3,
+  audience: Audience = 'investors'
 ): Promise<DiscoveryCandidate[]> {
+  const exp = isExp(audience);
   // Read a few "list of investors" pages: they name many investors at once.
   const listPages: PageContent[] = [];
   for (const r of results.filter(looksLikeList).slice(0, maxListPages)) {
     const p = await readPage(r.url, 7000);
     if (p.text.length > 500 && !/just a moment|attention required|access denied|verify you are human/i.test(p.title)) {
       listPages.push(p);
-      log('extract', `Read investor list page: ${p.title || r.title}`, 'info');
+      log('extract', `Read list page: ${p.title || r.title}`, 'info');
     }
   }
 
@@ -261,7 +292,11 @@ export async function extractCandidates(
     }
     try {
       parsed = await chatJson<any>(
-        `You extract REAL, specific investors from search results for a startup's fundraising. ${HONESTY_RULES}
+        exp
+          ? `You extract REAL, specific FUNDRAISING EXPERTS from search results — people or small firms who help startups raise money. ${HONESTY_RULES}
+Only include someone if the evidence text itself names them AND shows they help startups raise capital: fundraising consultant / advisor / coach, pitch deck consultant, financial-model consultant, fractional CFO who supports raises, startup lawyer for financings (SAFEs, seed rounds), boutique investment banker or placement agent for early-stage raises.
+Skip investors who only invest, journalists, recruiters, generic articles, software tools, and the startup itself.`
+          : `You extract REAL, specific investors from search results for a startup's fundraising. ${HONESTY_RULES}
 Only include an investor if the evidence text itself names them AND indicates they invest (angel, VC, partner, fund, angel group, family office, accelerator).
 Skip journalists, founders who are not investors, recruiters, generic articles, and the startup itself.`,
         `STARTUP:\n${startupBrief(s).slice(0, 1800)}
@@ -271,13 +306,13 @@ ${batch.map(b => `[${b.id}] ${b.url}\n${b.text}`).join('\n\n---\n\n')}
 
 Return JSON: {"investors":[{
  "name": "person name, or the firm name if no person is named",
- "firm": "fund / firm / angel group, or \\"Independent Angel\\"",
- "title": "e.g. Partner, Angel Investor, Managing Director",
- "investorType": "Angel | VC Fund | Micro-VC | Family Office | Angel Group | Accelerator | Corporate VC | Other",
+ "firm": ${exp ? '"their consultancy / company, or \\"Independent\\""' : '"fund / firm / angel group, or \\"Independent Angel\\""'},
+ "title": ${exp ? '"e.g. Fundraising Consultant, Founder, Fractional CFO, Partner"' : '"e.g. Partner, Angel Investor, Managing Director"'},
+ "investorType": "${typeList(audience)}",
  "location": "",
  "evidenceId": "the [id] where you saw them",
- "websiteUrl": "firm website ONLY if it appears in the evidence, else \\"\\"",
- "whyRelevant": "one sentence: why they may fit ${s.name}, based on the evidence"
+ "websiteUrl": "${exp ? 'their own website' : 'firm website'} ONLY if it appears in the evidence, else \\"\\"",
+ "whyRelevant": "one sentence: ${exp ? 'how they could help' : 'why they may fit'} ${s.name}, based on the evidence"
 }]}`,
         3500
       );
@@ -289,7 +324,7 @@ Return JSON: {"investors":[{
     for (const c of Array.isArray(parsed?.investors) ? parsed.investors : []) {
       const name = str(c.name, 120);
       if (!name || name.length < 3) continue;
-      const firm = str(c.firm, 120) || 'Independent Angel';
+      const firm = str(c.firm, 120) || (exp ? 'Independent' : 'Independent Angel');
       const key = normKey(name) + '|' + normKey(firm);
       if (seen.has(key) || seenNames.has(normKey(name))) continue;
       const block = batch.find(b => b.id === str(c.evidenceId).replace(/[\[\]]/g, '')) || batch[0];
@@ -304,7 +339,8 @@ Return JSON: {"investors":[{
         name,
         firm,
         title: str(c.title, 120),
-        investorType: asType(c.investorType),
+        investorType: expType(asType(c.investorType), exp),
+        audience,
         linkedinUrl: linkedinByBlock.get(block.id) || '',
         websiteUrl: web,
         sourceUrl: block.url,
@@ -315,7 +351,7 @@ Return JSON: {"investors":[{
       });
     }
   }
-  log('extract', `AI identified ${out.length} new investor candidates`, out.length ? 'success' : 'warn');
+  log('extract', `AI identified ${out.length} new ${exp ? 'fundraising experts' : 'investor candidates'}`, out.length ? 'success' : 'warn');
   return out;
 }
 
@@ -323,11 +359,12 @@ export async function discoverCandidates(
   s: StartupProfile,
   queries: string[],
   existing: { name: string; firm: string }[],
-  log: Log = noLog
+  log: Log = noLog,
+  audience: Audience = 'investors'
 ): Promise<{ candidates: DiscoveryCandidate[]; rawResults: SearchResult[] }> {
   const rawResults = await runSearches(queries, 10, log);
   if (!rawResults.length) return { candidates: [], rawResults };
-  const candidates = await extractCandidates(s, rawResults, existing, log);
+  const candidates = await extractCandidates(s, rawResults, existing, log, 3, audience);
   return { candidates, rawResults };
 }
 
@@ -340,10 +377,17 @@ export async function findLinkedInProfile(name: string, firm: string): Promise<s
   return hit ? normalizeLinkedInUrl(hit.url) : '';
 }
 
-async function findFirmWebsite(firm: string, name: string): Promise<{ url: string; snippets: SearchResult[] }> {
-  const q = /independent|angel$/i.test(firm) ? `"${name}" angel investor portfolio` : `"${firm}" venture investor portfolio`;
+async function findFirmWebsite(firm: string, name: string, exp = false): Promise<{ url: string; snippets: SearchResult[] }> {
+  const q = exp
+    ? /^independent$/i.test(firm) || !firm
+      ? `"${name}" fundraising consultant startups`
+      : `"${firm}" startup fundraising services`
+    : /independent|angel$/i.test(firm)
+      ? `"${name}" angel investor portfolio`
+      : `"${firm}" venture investor portfolio`;
   const { results } = await webSearch(q, 8);
-  const token = normKey(firm.replace(/\b(the|capital|ventures?|partners|fund|vc|group|angels?|llc|inc)\b/gi, '')).slice(0, 6);
+  const base = exp && (/^independent$/i.test(firm) || !firm) ? name : firm;
+  const token = normKey(base.replace(/\b(the|capital|ventures?|partners|fund|vc|group|angels?|llc|inc|advisors?|consulting|consultants?)\b/gi, '')).slice(0, 6);
   const host = (u: string) => {
     try {
       return normKey(new URL(u).hostname);
@@ -443,12 +487,16 @@ function normalizeSequence(seq: any): EmailSequenceStep[] {
   }));
 }
 
-const OUTREACH_SPEC = (s: StartupProfile, settings?: Partial<AppSettings>) => `"outreach": {
+const OUTREACH_SPEC = (s: StartupProfile, settings?: Partial<AppSettings>, audience?: Audience) => `"outreach": {
   "sequence": [4 emails: {"stepName","dayDelay" (0,4,10,21),"subject","body","rationale"}],
   "linkedinNote": "LinkedIn connection request note, MAX 280 characters, personal, no links",
   "linkedinMessage": "LinkedIn DM to send after they accept, 60-110 words"
 }
-Outreach rules: write as ${senderName(s, settings)} from ${s.name}. Email 1 is 80-130 words, opens with something SPECIFIC to this investor (their thesis or a portfolio company FROM THE EVIDENCE), one-line pitch, why them, a soft ask (15-min call or deck). Follow-ups are shorter and add new value. Final email politely closes the loop. Plain text, no placeholders like [Name] except [Calendly link] / [Deck link] if needed. Do not claim traction that was not given. Sign off with "${senderName(s, settings)}".`;
+Outreach rules: write as ${senderName(s, settings)} from ${s.name}. ${
+  isExp(audience)
+    ? `This person is a FUNDRAISING EXPERT, not an investor — do not pitch them to invest. Email 1 is 80-130 words, opens with something SPECIFIC to them (a client they helped, their service or their content FROM THE EVIDENCE), one-line description of ${s.name} and where we are in our raise, why them, and a soft ask: a 15-min call to see whether they could help with our round and how they usually work with founders. Never promise fees or terms.`
+    : `Email 1 is 80-130 words, opens with something SPECIFIC to this investor (their thesis or a portfolio company FROM THE EVIDENCE), one-line pitch, why them, a soft ask (15-min call or deck).`
+} Follow-ups are shorter and add new value. Final email politely closes the loop. Plain text, no placeholders like [Name] except [Calendly link] / [Deck link] if needed. Do not claim traction that was not given. Sign off with "${senderName(s, settings)}".`;
 
 export async function researchCandidate(
   s: StartupProfile,
@@ -457,6 +505,8 @@ export async function researchCandidate(
   log: Log = noLog
 ): Promise<Investor> {
   const who = c.name;
+  const audience: Audience = c.audience ? audienceOf(c) : audienceOf(settings);
+  const exp = isExp(audience);
   const evidence: string[] = [];
   const sources = new Set<string>([c.sourceUrl].filter(Boolean));
   evidence.push(`DISCOVERY SOURCE (${c.sourceUrl}): ${c.sourceTitle}\n${c.snippet}`);
@@ -471,7 +521,7 @@ export async function researchCandidate(
   // 2. Website
   let website = c.websiteUrl;
   // Only spend a search credit on finding the website when we don't already have it.
-  const look = website ? { url: '', snippets: [] as SearchResult[] } : await findFirmWebsite(c.firm, c.name).catch(() => ({ url: '', snippets: [] as SearchResult[] }));
+  const look = website ? { url: '', snippets: [] as SearchResult[] } : await findFirmWebsite(c.firm, c.name, exp).catch(() => ({ url: '', snippets: [] as SearchResult[] }));
   if (!website) website = look.url;
   for (const r of look.snippets.slice(0, 6)) {
     evidence.push(`SEARCH (${r.url}): ${r.title} — ${r.snippet}`);
@@ -530,15 +580,20 @@ export async function researchCandidate(
     if (webEmails.size) log('research', `Found a published email on the web for ${root}`, 'info', who);
   }
 
+  // an email seen in the search result that led us here counts too (same-domain rule applies below)
+  extractEmails(`${c.sourceTitle || ''} ${c.snippet || ''}`).forEach(e => emails.add(e));
+
   const evidenceText = evidence.join('\n\n---\n\n').slice(0, 9000);
   const emailList = [...emails];
 
   const out = await chatJson<any>(
-    `You are a VC research analyst + fundraising copywriter for ${s.name}. Today is ${today()}. ${HONESTY_RULES}`,
+    exp
+      ? `You research FUNDRAISING EXPERTS (consultants, advisors, pitch-deck / financial-model specialists, fractional CFOs, startup lawyers, boutique bankers) who could help ${s.name} raise its round, and you write outreach to them. Today is ${today()}. ${HONESTY_RULES}`
+      : `You are a VC research analyst + fundraising copywriter for ${s.name}. Today is ${today()}. ${HONESTY_RULES}`,
     `STARTUP:
 ${startupBrief(s)}
 
-INVESTOR CANDIDATE: ${c.name} — ${c.title || ''} @ ${c.firm} (${c.investorType})
+${exp ? 'FUNDRAISING EXPERT' : 'INVESTOR'} CANDIDATE: ${c.name} — ${c.title || ''} @ ${c.firm} (${c.investorType})
 Why discovered: ${c.whyRelevant}
 
 EVIDENCE COLLECTED FROM THE PUBLIC WEB:
@@ -549,22 +604,36 @@ Emails found on their site: ${emailList.join(', ') || 'none'}
 Return JSON:
 {
  "profile": {
-   "title": "", "firm": "", "investorType": "Angel | VC Fund | Micro-VC | Family Office | Angel Group | Accelerator | Corporate VC | Other",
-   "location": "", "stage": "Pre-seed | Seed | Series A | Growth | All Stages | Unknown",
-   "checkSizeFormatted": "e.g. $25k - $100k, or Unknown", "checkSizeMin": number or 0, "checkSizeMax": number or 0,
+   "title": "", "firm": "", "investorType": "${typeList(audience)}",
+   "location": "", "stage": "${exp ? 'stages they help with: ' : ''}Pre-seed | Seed | Series A | Growth | All Stages | Unknown",
+   ${
+     exp
+       ? `"checkSizeFormatted": "their fees / pricing ONLY if published (e.g. '$3k/month retainer', 'fixed fee', 'success fee'), else Unknown", "checkSizeMin": 0, "checkSizeMax": 0,
+   "industries": ["sectors they work in, FROM EVIDENCE"], "portfolio": ["startups / clients they helped, named IN EVIDENCE"],
+   "recentInvestments": [{"name":"client or raise they helped with","year":"","sector":"","note":"amount raised etc. only if in evidence"}],
+   "thesis": "the services they offer and how they work, from evidence", "contactRoute": "best legitimate route: e.g. 'Email', 'Book a call on website', 'Contact form', 'LinkedIn connection'",
+   "email": "ONLY an email from the list above that belongs to this person/firm, else \\"\\"",`
+       : `"checkSizeFormatted": "e.g. $25k - $100k, or Unknown", "checkSizeMin": number or 0, "checkSizeMax": number or 0,
    "industries": ["focus areas FROM EVIDENCE"], "portfolio": ["portfolio companies named IN EVIDENCE"],
    "recentInvestments": [{"name":"","year":"","sector":"","note":""}],
    "thesis": "their stated thesis, from evidence", "contactRoute": "best legitimate route: e.g. 'Email partner', 'Website pitch form', 'LinkedIn connection', 'Warm intro preferred'",
-   "email": "ONLY an email from the list above that belongs to this investor/firm, else \\"\\"",
+   "email": "ONLY an email from the list above that belongs to this investor/firm, else \\"\\"",`
+   }
    "twitter": "", "keyQuotes": ["short quotes copied from evidence"]
  },
- "isRealInvestor": true/false (false if evidence suggests this is not an active investor),
+ "isRealInvestor": true/false (${exp ? 'false if evidence suggests they do NOT actually help startups raise money' : 'false if evidence suggests this is not an active investor'}),
  "fit": {"thesisMatch":0-100,"stageMatch":0-100,"sectorMatch":0-100,"checkSizeMatch":0-100,"synergyMatch":0-100,"total":0-100,
-         "verdict":"one sentence","whyInvest":["3 evidence-based reasons"],"hesitations":["2 honest concerns"],"keyTalkingPoint":"the single best hook for outreach"},
- "researchNotes": "4-6 sentences: who they are, what they invest in, what you could NOT verify",
- ${OUTREACH_SPEC(s, settings)}
+         "verdict":"one sentence","whyInvest":["3 evidence-based reasons ${exp ? 'they could help' : ''}"],"hesitations":["2 honest concerns"],"keyTalkingPoint":"the single best hook for outreach"},
+ "researchNotes": "4-6 sentences: who they are, ${exp ? 'what fundraising help they offer and for whom' : 'what they invest in'}, what you could NOT verify",
+ ${OUTREACH_SPEC(s, settings, audience)}
 }
-Scoring guide: 80+ = clear thesis + stage match for a kids/family consumer app; 55-79 = adjacent (consumer, edtech, fintech generalist); <55 = weak/unclear. Be strict when evidence is thin.`,
+${
+  exp
+    ? `Fit fields for an expert: thesisMatch = how much they specialise in startup fundraising; stageMatch = they help pre-seed/seed companies; sectorMatch = experience with consumer / kids / family / fintech / edtech; checkSizeMatch = affordable for a pre-seed startup (Unknown fees = 50); synergyMatch = track record and investor network shown in evidence.
+Scoring guide: 80+ = clearly helps early-stage consumer startups raise, with evidence of results; 55-79 = general startup fundraising help; <55 = weak, unclear, late-stage only or big-company only. Be strict when evidence is thin.
+If they charge a success fee for introducing investors, add a hesitation: "Success fees for investor intros may require a registered broker-dealer in the US — check before signing."`
+    : `Scoring guide: 80+ = clear thesis + stage match for a kids/family consumer app; 55-79 = adjacent (consumer, edtech, fintech generalist); <55 = weak/unclear. Be strict when evidence is thin.`
+}`,
     3500
   );
 
@@ -573,7 +642,10 @@ Scoring guide: 80+ = clear thesis + stage match for a kids/family consumer app; 
   if (out?.isRealInvestor === false) {
     fit.total = Math.min(fit.total, 30);
     fit.status = 'cold';
-    fit.hesitations = ['Evidence suggests this may not be an active investor — verify before contacting.', ...fit.hesitations].slice(0, 5);
+    fit.hesitations = [
+      exp ? 'Evidence suggests they may not really offer fundraising help — verify before contacting.' : 'Evidence suggests this may not be an active investor — verify before contacting.',
+      ...fit.hesitations
+    ].slice(0, 5);
   }
   const email = str(p.email, 200).toLowerCase();
   // Only keep an email that was really published AND belongs to this investor's own site (or a personal mailbox).
@@ -596,9 +668,10 @@ Scoring guide: 80+ = clear thesis + stage match for a kids/family consumer app; 
     id: uid('inv'),
     emailSearchV: EMAIL_SEARCH_V,
     name: c.name,
-    title: str(p.title, 120) || c.title || 'Investor',
+    title: str(p.title, 120) || c.title || (exp ? 'Fundraising expert' : 'Investor'),
     firm: str(p.firm, 120) || c.firm,
-    investorType: asType(p.investorType || c.investorType),
+    investorType: expType(asType(p.investorType || c.investorType), exp),
+    audience,
     website: website || '',
     email: verifiedEmail,
     linkedin: linkedin || '',
@@ -649,13 +722,14 @@ Scoring guide: 80+ = clear thesis + stage match for a kids/family consumer app; 
 }
 
 function investorBrief(i: Investor): string {
+  const exp = isExp(i.audience);
   return [
-    `Name: ${i.name} — ${i.title} @ ${i.firm} (${i.investorType || ''})`,
+    `Name: ${i.name} — ${i.title} @ ${i.firm} (${i.investorType || ''})${exp ? ' — FUNDRAISING EXPERT (helps startups raise; not an investor)' : ''}`,
     `Location: ${i.location}`,
-    `Stage: ${i.stage}; Check: ${i.checkSizeFormatted}`,
+    exp ? `Stages they help: ${i.stage}; Fees: ${i.checkSizeFormatted}` : `Stage: ${i.stage}; Check: ${i.checkSizeFormatted}`,
     `Industries: ${i.industries.join(', ')}`,
-    `Portfolio: ${i.portfolio.join(', ')}`,
-    `Thesis: ${i.thesis}`,
+    `${exp ? 'Past clients' : 'Portfolio'}: ${i.portfolio.join(', ')}`,
+    `${exp ? 'Services' : 'Thesis'}: ${i.thesis}`,
     `Research notes: ${i.researchNotes}`,
     i.extractedData?.extractedTextExcerpt ? `Website excerpt: ${i.extractedData.extractedTextExcerpt.slice(0, 1500)}` : ''
   ].join('\n');
@@ -663,8 +737,10 @@ function investorBrief(i: Investor): string {
 
 export async function scoreInvestor(s: StartupProfile, i: Investor): Promise<{ fitScore: InvestorFitScore; researchNotes: string }> {
   const out = await chatJson<any>(
-    `You are a VC analyst scoring investor fit for ${s.name}. ${HONESTY_RULES}`,
-    `STARTUP:\n${startupBrief(s)}\n\nINVESTOR:\n${investorBrief(i)}\n\nReturn JSON: {"fit": {"thesisMatch":0-100,"stageMatch":0-100,"sectorMatch":0-100,"checkSizeMatch":0-100,"synergyMatch":0-100,"total":0-100,"verdict":"","whyInvest":["3"],"hesitations":["2"],"keyTalkingPoint":""}, "researchNotes": "updated 3-5 sentence notes"}
+    isExp(i.audience)
+      ? `You score how well a FUNDRAISING EXPERT could help ${s.name} raise its round. thesisMatch = fundraising specialty, stageMatch = helps pre-seed/seed, sectorMatch = consumer/kids/fintech/edtech experience, checkSizeMatch = affordable for a pre-seed startup, synergyMatch = track record + investor network. ${HONESTY_RULES}`
+      : `You are a VC analyst scoring investor fit for ${s.name}. ${HONESTY_RULES}`,
+    `STARTUP:\n${startupBrief(s)}\n\n${isExp(i.audience) ? 'FUNDRAISING EXPERT' : 'INVESTOR'}:\n${investorBrief(i)}\n\nReturn JSON: {"fit": {"thesisMatch":0-100,"stageMatch":0-100,"sectorMatch":0-100,"checkSizeMatch":0-100,"synergyMatch":0-100,"total":0-100,"verdict":"","whyInvest":["3"],"hesitations":["2"],"keyTalkingPoint":""}, "researchNotes": "updated 3-5 sentence notes"}
 Be strict when information is thin.`,
     2000
   );
@@ -678,7 +754,7 @@ export async function generateOutreach(
 ): Promise<{ sequences: EmailSequenceStep[]; linkedinNote: string; linkedinMessage: string }> {
   const out = await chatJson<any>(
     `You are an expert fundraising copywriter for ${s.name}. ${HONESTY_RULES}`,
-    `STARTUP:\n${startupBrief(s)}\n\nINVESTOR:\n${investorBrief(i)}\nBest hook: ${i.fitScore?.keyTalkingPoint || ''}\n\nReturn JSON: {${OUTREACH_SPEC(s, settings)}}`,
+    `STARTUP:\n${startupBrief(s)}\n\n${isExp(i.audience) ? 'FUNDRAISING EXPERT' : 'INVESTOR'}:\n${investorBrief(i)}\nBest hook: ${i.fitScore?.keyTalkingPoint || ''}\n\nReturn JSON: {${OUTREACH_SPEC(s, settings, audienceOf(i))}}`,
     3000
   );
   return {
@@ -741,10 +817,16 @@ export function startAgentJob(
       const q = defaultQueries(startup, settings);
       const queries = [...q.linkedin.slice(0, 5), ...q.web.slice(0, 6), ...(opts.extraQueries || [])];
       log('search', `Phase 2 — running ${queries.length} searches (public LinkedIn profiles + investor websites)…`);
-      const { candidates } = await discoverCandidates(startup, queries, existing, (ph, m, l, n) => {
-        log(ph, m, l, n);
-        if (ph === 'search') job.progress = Math.min(30, job.progress + 2);
-      });
+      const { candidates } = await discoverCandidates(
+        startup,
+        queries,
+        existing,
+        (ph, m, l, n) => {
+          log(ph, m, l, n);
+          if (ph === 'search') job.progress = Math.min(30, job.progress + 2);
+        },
+        audienceOf(settings)
+      );
       job.progress = 35;
       if (!candidates.length) {
         log('extract', 'No new investors found this run. Try again later, add search keys (Tavily/Serper), or edit search queries in the Brain tab.', 'warn');
@@ -817,19 +899,28 @@ export function startAgentJob(
 /** Score many candidates cheaply from their search snippets — 10 per AI request. */
 export async function quickScoreCandidates(
   s: StartupProfile,
-  cands: { id: string; name: string; firm: string; title: string; investorType: string; snippet: string; whyRelevant: string; location: string }[]
+  cands: { id: string; name: string; firm: string; title: string; investorType: string; snippet: string; whyRelevant: string; location: string }[],
+  audience: Audience = 'investors'
 ): Promise<Map<string, { score: number; reason: string; isInvestor: boolean }>> {
+  const exp = isExp(audience);
   const out = new Map<string, { score: number; reason: string; isInvestor: boolean }>();
   if (!cands.length) return out;
   const res = await chatJson<any>(
-    `You are a VC analyst doing a FAST first-pass fit check for ${s.name}. Use only the text given. ${HONESTY_RULES}`,
+    exp
+      ? `You do a FAST first-pass check of FUNDRAISING EXPERTS who could help ${s.name} raise its round. Use only the text given. ${HONESTY_RULES}`
+      : `You are a VC analyst doing a FAST first-pass fit check for ${s.name}. Use only the text given. ${HONESTY_RULES}`,
     `STARTUP:\n${startupBrief(s).slice(0, 1500)}
 
 CANDIDATES:
 ${cands.map((c, i) => `[${i + 1}] ${c.name} — ${c.title} @ ${c.firm} (${c.investorType}) ${c.location}\nSeen: ${c.snippet.slice(0, 300)}\nWhy found: ${c.whyRelevant}`).join('\n\n')}
 
 Return JSON: {"scores":[{"n":1,"score":0-100,"isInvestor":true/false,"reason":"one short sentence"}]} — one entry per candidate, same numbers.
-Scoring: 75+ clear thesis/stage fit for a kids/family consumer app at pre-seed; 50-74 adjacent (consumer, edtech, fintech, local angel); <50 weak or unclear. Be strict when the text is thin.`,
+${
+  exp
+    ? `"isInvestor" here means: true if they really help startups raise money (consultant, advisor, coach, pitch deck / financial model expert, fractional CFO, startup lawyer, boutique banker); false otherwise.
+Scoring: 75+ clearly helps early-stage consumer / kids / fintech / edtech startups raise; 50-74 general startup fundraising help; <50 weak, unclear, or only late-stage / big companies. Be strict when the text is thin.`
+    : `Scoring: 75+ clear thesis/stage fit for a kids/family consumer app at pre-seed; 50-74 adjacent (consumer, edtech, fintech, local angel); <50 weak or unclear. Be strict when the text is thin.`
+}`,
     1500
   );
   for (const r of Array.isArray(res?.scores) ? res.scores : []) {
@@ -847,6 +938,7 @@ export async function generateSearchQueries(
   used: string[],
   count = 24
 ): Promise<string[]> {
+  if (isExp(settings.audience)) return generateExpertQueries(s, settings, used, count);
   const res = await chatJson<any>(
     `You plan investor searches for ${s.name}. ${HONESTY_RULES}`,
     `STARTUP:\n${startupBrief(s).slice(0, 2000)}
@@ -856,8 +948,32 @@ Queries ALREADY USED (do not repeat or lightly reword them):
 ${used.slice(-120).join('\n') || '(none)'}
 
 Write ${count} NEW, varied Google queries that surface SPECIFIC investors who could fund this company. Mix:
-- about half that find PUBLIC LinkedIn profiles: must start with site:linkedin.com/in and use quoted phrases (roles like "angel investor", "partner", "principal", "scout"; themes; cities; portfolio companies like Greenlight, GoHenry, BusyKid, Step, Outschool)
-- the rest find funds, angel groups, accelerators, family offices, and "investors in <comparable company>" lists
+- about a third that find PUBLIC LinkedIn profiles: must start with site:linkedin.com/in and use quoted phrases (roles like "angel investor", "partner", "principal", "scout"; themes; cities; portfolio companies like Greenlight, GoHenry, BusyKid, Step, Outschool)
+- about a third find funds, angel groups and accelerators that PUBLISH an email for pitches (e.g. "send us your pitch deck", "pitch@", "deals@", "email your deck") — these are the investors we can actually email
+- the rest find funds, angel groups, family offices, and "investors in <comparable company>" lists
+Return JSON: {"queries":["..."]}`,
+    1500
+  );
+  const usedSet = new Set(used.map(q => q.toLowerCase().trim()));
+  return arr(res?.queries, count * 2)
+    .map(q => q.trim())
+    .filter(q => q.length > 8 && !usedSet.has(q.toLowerCase()))
+    .slice(0, count);
+}
+
+async function generateExpertQueries(s: StartupProfile, settings: Partial<AppSettings>, used: string[], count: number): Promise<string[]> {
+  const res = await chatJson<any>(
+    `You plan searches that find FUNDRAISING EXPERTS for ${s.name}. ${HONESTY_RULES}`,
+    `STARTUP:\n${startupBrief(s).slice(0, 1500)}
+Geography focus: ${settings.geographyFocus || 'United States'}
+
+Queries ALREADY USED (do not repeat or lightly reword them):
+${used.slice(-120).join('\n') || '(none)'}
+
+Write ${count} NEW, varied Google queries that surface SPECIFIC people or small firms who help startups like this raise money: fundraising consultants, fundraising advisors / coaches, pitch deck consultants, financial-model consultants, fractional CFOs, startup lawyers for SAFEs / seed rounds, boutique investment banks for early-stage raises. Mix:
+- about a third that find PUBLIC LinkedIn profiles: must start with site:linkedin.com/in and use quoted phrases (roles + themes like consumer apps, fintech, edtech, kids, or cities)
+- about a third that find experts who publish a way to contact them (e.g. "book a call", "contact", "email us")
+- the rest: lists and directories of such experts, and experts who mention helping companies similar to this one
 Return JSON: {"queries":["..."]}`,
     1500
   );
@@ -872,10 +988,12 @@ Return JSON: {"queries":["..."]}`,
 export function candidateToQuickInvestor(c: DiscoveryCandidate, score: number, reason: string, campaignId?: string): Investor {
   const now = new Date().toISOString();
   const status = fitStatus(score);
+  const audience = audienceOf(c);
   return {
     id: uid('inv'),
+    audience,
     name: c.name,
-    title: c.title || 'Investor',
+    title: c.title || (isExp(audience) ? 'Fundraising expert' : 'Investor'),
     firm: c.firm,
     investorType: c.investorType,
     website: c.websiteUrl || '',
@@ -936,6 +1054,7 @@ export function investorToCandidate(i: Investor): DiscoveryCandidate {
     firm: i.firm,
     title: i.title,
     investorType: (i.investorType || 'Other') as InvestorType,
+    audience: audienceOf(i),
     linkedinUrl: i.linkedin || '',
     websiteUrl: i.website || '',
     sourceUrl: i.sourceUrls?.[0] || i.extractedData?.rawUrl || '',

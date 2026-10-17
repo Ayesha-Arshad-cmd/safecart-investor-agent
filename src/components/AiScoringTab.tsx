@@ -13,6 +13,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { Investor, StartupProfile, AppSettings } from '../types';
+import { audienceOf, textFor } from '../data/audience';
 import { api } from '../services/api';
 
 interface AiScoringTabProps {
@@ -32,6 +33,7 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
   onOpenInvestorDetail,
   showToast
 }) => {
+  const T = textFor(audienceOf(settings));
   const [selectedInvestorId, setSelectedInvestorId] = useState<string>(investors[0]?.id || '');
   const [isScoring, setIsScoring] = useState(false);
   const [copiedAngle, setCopiedAngle] = useState(false);
@@ -79,7 +81,7 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
   if (!selectedInvestor) {
     return (
       <div className="p-8 text-center text-slate-500">
-        No investors yet. Click "Find investors" at the top to get started.
+        No {T.many} yet. Click "{T.find}" at the top to get started.
       </div>
     );
   }
@@ -90,8 +92,8 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Investor scores</h1>
-          <p className="text-sm text-slate-500 mt-0.5">How well each investor fits {startup.name}.</p>
+          <h1 className="text-xl font-semibold text-slate-900">{T.One} scores</h1>
+          <p className="text-sm text-slate-500 mt-0.5">How well each {T.one} fits {startup.name}.</p>
         </div>
 
         <button
@@ -110,7 +112,7 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
         {/* Left Column: Investor List */}
         <div className="space-y-2 bg-white border border-slate-200 rounded-xl shadow-sm p-3 max-h-[700px] overflow-y-auto">
           <div className="text-xs font-semibold text-slate-500 px-2 uppercase tracking-wider mb-2">
-            Investors ({investors.length})
+            {T.Many} ({investors.length})
           </div>
 
           {[...investors].sort((a, b) => b.fitScore.total - a.fitScore.total).map(inv => (
@@ -155,7 +157,7 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
                   <span className="text-xs text-slate-500">({selectedInvestor.title}, {selectedInvestor.firm})</span>
                 </div>
                 <div className="text-xs text-slate-500 mt-0.5">
-                  Stage: <strong className="text-slate-800">{selectedInvestor.stage}</strong> · Check: <strong className="text-emerald-600">{selectedInvestor.checkSizeFormatted}</strong>
+                  {T.field.stage}: <strong className="text-slate-800">{selectedInvestor.stage}</strong> · {T.field.check}: <strong className="text-emerald-600">{selectedInvestor.checkSizeFormatted}</strong>
                 </div>
               </div>
 
@@ -179,7 +181,7 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
                 
                 <div className="bg-white p-2.5 rounded border border-slate-200">
-                  <div className="text-[11px] text-slate-500">THESIS</div>
+                  <div className="text-[11px] text-slate-500 uppercase">{T.fit.thesis}</div>
                   <div className="text-base font-bold text-slate-900 mt-0.5">{selectedInvestor.fitScore.thesisMatch}%</div>
                   <div className="w-full bg-slate-100 rounded-full h-1 mt-1.5 overflow-hidden">
                     <div className="bg-cyan-600 h-1" style={{ width: `${selectedInvestor.fitScore.thesisMatch}%` }} />
@@ -187,7 +189,7 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
                 </div>
 
                 <div className="bg-white p-2.5 rounded border border-slate-200">
-                  <div className="text-[11px] text-slate-500">STAGE</div>
+                  <div className="text-[11px] text-slate-500 uppercase">{T.fit.stage}</div>
                   <div className="text-base font-bold text-slate-900 mt-0.5">{selectedInvestor.fitScore.stageMatch}%</div>
                   <div className="w-full bg-slate-100 rounded-full h-1 mt-1.5 overflow-hidden">
                     <div className="bg-emerald-600 h-1" style={{ width: `${selectedInvestor.fitScore.stageMatch}%` }} />
@@ -195,7 +197,7 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
                 </div>
 
                 <div className="bg-white p-2.5 rounded border border-slate-200">
-                  <div className="text-[11px] text-slate-500">SECTOR</div>
+                  <div className="text-[11px] text-slate-500 uppercase">{T.fit.sector}</div>
                   <div className="text-base font-bold text-slate-900 mt-0.5">{selectedInvestor.fitScore.sectorMatch}%</div>
                   <div className="w-full bg-slate-100 rounded-full h-1 mt-1.5 overflow-hidden">
                     <div className="bg-amber-600 h-1" style={{ width: `${selectedInvestor.fitScore.sectorMatch}%` }} />
@@ -203,7 +205,7 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
                 </div>
 
                 <div className="bg-white p-2.5 rounded border border-slate-200">
-                  <div className="text-[11px] text-slate-500">SYNERGY</div>
+                  <div className="text-[11px] text-slate-500 uppercase">{T.fit.synergy}</div>
                   <div className="text-base font-bold text-slate-900 mt-0.5">{selectedInvestor.fitScore.synergyMatch}%</div>
                   <div className="w-full bg-slate-100 rounded-full h-1 mt-1.5 overflow-hidden">
                     <div className="bg-purple-600 h-1" style={{ width: `${selectedInvestor.fitScore.synergyMatch}%` }} />
@@ -223,7 +225,7 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
               
               <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
                 <span className="font-semibold text-emerald-600 flex items-center gap-1.5 mb-2">
-                  <Check className="w-3.5 h-3.5" /> Why they'd invest
+                  <Check className="w-3.5 h-3.5" /> {T.field.why}
                 </span>
                 <ul className="space-y-1.5 text-slate-700 text-xs">
                   {selectedInvestor.fitScore.whyInvest.map((w, idx) => (

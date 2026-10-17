@@ -124,7 +124,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, s
           <div className="font-semibold text-slate-700">Preferences</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-slate-500 mb-1">Investors to find per run</label>
+              <label className="block text-slate-500 mb-1">People to find per run</label>
               <input
                 type="number"
                 min={10}
@@ -135,7 +135,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, s
               />
             </div>
             <div>
-              <label className="block text-slate-500 mb-1">Skip investors scoring below</label>
+              <label className="block text-slate-500 mb-1">Skip anyone scoring below</label>
               <input
                 type="number"
                 min={0}
@@ -170,7 +170,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, s
           <div className="font-semibold text-slate-700 pt-2">Deep research</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-slate-500 mb-1">Deep-research investors scoring at least</label>
+              <label className="block text-slate-500 mb-1">Deep-research anyone scoring at least</label>
               <input
                 type="number"
                 min={0}
@@ -200,7 +200,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, s
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-slate-500 mb-1">Only investors scoring at least</label>
+              <label className="block text-slate-500 mb-1">Only people scoring at least</label>
               <input
                 type="number"
                 min={0}

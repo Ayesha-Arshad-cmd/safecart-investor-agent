@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Search, ExternalLink, Sparkles, Plus, Loader2, CheckCircle2, Linkedin, Globe, Layers, XCircle } from 'lucide-react';
 import { Investor, StartupProfile, AppSettings, DiscoveryCandidate } from '../types';
 import { api } from '../services/api';
+import { audienceOf, textFor, expertQueries } from '../data/audience';
 
 interface DiscoveryTabProps {
   startup: StartupProfile;
@@ -24,11 +25,18 @@ export const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ startup, settings, i
   const [processing, setProcessing] = useState<Record<string, 'busy' | 'done' | 'error'>>({});
   const [bulkRunning, setBulkRunning] = useState(false);
 
+  const aud = audienceOf(settings);
+  const T = textFor(aud);
   const presets = useMemo(() => {
+    if (aud === 'experts') {
+      const city = (startup.location || '').split(',').slice(0, 2).map(x => x.trim()).join(' ');
+      const q = expertQueries((startup.investorKeywords || []).slice(0, 5), city);
+      return [...q.linkedin.slice(0, 5).map(x => ({ q: x, mode: 'linkedin' as Mode })), ...q.web.slice(0, 6).map(x => ({ q: x, mode: 'web' as Mode }))];
+    }
     const li = (startup.linkedinSearchQueries || []).slice(0, 6).map(q => ({ q, mode: 'linkedin' as Mode }));
     const web = (startup.webSearchQueries || []).slice(0, 6).map(q => ({ q, mode: 'web' as Mode }));
     return [...li, ...web];
-  }, [startup.linkedinSearchQueries, startup.webSearchQueries]);
+  }, [aud, startup.linkedinSearchQueries, startup.webSearchQueries, startup.investorKeywords, startup.location]);
 
   const runSearch = async (q?: string, m: Mode = mode) => {
     setIsSearching(true);
@@ -39,7 +47,7 @@ export const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ startup, settings, i
       setCandidates(res.candidates.map(c => ({ ...c, alreadyInCrm: existing.has(c.name.toLowerCase()) })));
       const warn = res.logs.filter(l => /No results|failed/i.test(l));
       setSearchInfo(
-        `Searched ${res.queries.length} quer${res.queries.length === 1 ? 'y' : 'ies'}, read ${res.resultsSearched} results → ${res.candidates.length} new investors.` +
+        `Searched ${res.queries.length} quer${res.queries.length === 1 ? 'y' : 'ies'}, read ${res.resultsSearched} results → ${res.candidates.length} new ${T.many}.` +
           (warn.length ? ` ⚠ ${warn[0]}` : '')
       );
     } catch (e: any) {
@@ -78,14 +86,14 @@ export const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ startup, settings, i
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Search for investors</h1>
+          <h1 className="text-xl font-semibold text-slate-900">Search for {aud === 'experts' ? 'fundraising experts' : 'investors'}</h1>
           <p className="text-sm text-slate-500 mt-0.5">Search LinkedIn and the web, then add the ones you like.</p>
         </div>
         <button
           onClick={onOpenRunnerModal}
           className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg cursor-pointer shrink-0"
         >
-          <Sparkles className="w-4 h-4" /> Auto-find investors
+          <Sparkles className="w-4 h-4" /> Auto-find {T.many}
         </button>
       </div>
 
@@ -93,7 +101,7 @@ export const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ startup, settings, i
         {(
           [
             ['linkedin', <Linkedin key="l" className="w-3.5 h-3.5" />, 'LinkedIn profiles'],
-            ['web', <Globe key="w" className="w-3.5 h-3.5" />, 'Funds & angel groups'],
+            ['web', <Globe key="w" className="w-3.5 h-3.5" />, aud === 'experts' ? 'Websites & directories' : 'Funds & angel groups'],
             ['both', <Layers key="b" className="w-3.5 h-3.5" />, 'Both']
           ] as const
         ).map(([id, icon, text]) => (
@@ -146,9 +154,13 @@ export const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ startup, settings, i
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder={
-              mode === 'linkedin'
-                ? 'e.g. "angel investor" edtech Arizona'
-                : 'e.g. investors in kids fintech startups'
+              aud === 'experts'
+                ? mode === 'linkedin'
+                  ? 'e.g. "fundraising consultant" consumer apps'
+                  : 'e.g. pitch deck consultant for seed startups'
+                : mode === 'linkedin'
+                  ? 'e.g. "angel investor" edtech Arizona'
+                  : 'e.g. investors in kids fintech startups'
             }
             className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-2.5 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500"
           />

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Play, Pause, Loader2, Terminal, Sparkles, RotateCw } from 'lucide-react';
 import { Investor, StartupProfile, AppSettings, Campaign } from '../types';
+import { audienceOf, textFor } from '../data/audience';
 import { api } from '../services/api';
 
 interface Props {
@@ -28,7 +29,7 @@ const phaseClass: Record<string, string> = {
 const PHASE_LABEL: Record<Campaign['phase'], string> = {
   queries: 'Planning searches',
   search: 'Searching the web & LinkedIn',
-  extract: 'Picking out investors',
+  extract: 'Picking out the right people',
   quick: 'Quick-scoring',
   deep: 'Deep research',
   done: 'Finished'
@@ -119,7 +120,7 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
       }
       if (mode === 'upgrade') {
         const r = await api.upgradeCampaign(s, settings, target);
-        if (!r.campaign) throw new Error('Nothing to research — every investor in your list is already fully researched.');
+        if (!r.campaign) throw new Error(`Nothing to research — every ${textFor(audienceOf(settings)).one} in your list is already fully researched.`);
         setCampaign(r.campaign);
         setShowForm(false);
         return;
@@ -146,6 +147,9 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
   const running = campaign?.status === 'running';
   const k = campaign?.counts || { found: 0, quick: 0, researched: 0, skipped: 0, failed: 0 };
   const pct = campaign ? progressOf(campaign) : 0;
+  const T = textFor(audienceOf(settings));
+  // a run that is looking for the OTHER list (it keeps going in the background)
+  const otherRun = campaign && audienceOf(campaign) !== audienceOf(settings) ? textFor(audienceOf(campaign)) : null;
   const quickCount = existingInvestors.filter(i => i.researchDepth === 'quick').length;
   const noEmailCount = existingInvestors.filter(i => i.researchDepth !== 'quick' && !i.email && (i.emailSearchV || 0) < 2).length;
   const stats: [string, number][] =
@@ -171,7 +175,9 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
             <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700">
               <Sparkles className="w-5 h-5" />
             </div>
-            <h2 className="text-base font-semibold text-slate-900">Find investors for {startup.name}</h2>
+            <h2 className="text-base font-semibold text-slate-900">
+              {showForm ? T.find : otherRun ? otherRun.find : T.find} for {startup.name}
+            </h2>
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1 rounded-md hover:bg-slate-100 cursor-pointer" title="Close (the run keeps going)">
             <X className="w-5 h-5" />
@@ -180,10 +186,15 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
 
         {showForm ? (
           <div className="my-5 space-y-4 text-sm">
+            {running && otherRun && (
+              <div className="text-xs rounded-lg border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2">
+                A run for <b>{otherRun.many}</b> is still going. Only one run at a time — pause it (Back to current run → Pause) or wait for it to finish.
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">
-                  {mode === 'upgrade' ? 'How many to research?' : 'How many investors this run?'}
+                  {mode === 'upgrade' ? 'How many to research?' : `How many ${T.many} this run?`}
                 </label>
                 <input
                   type="number"
@@ -211,7 +222,7 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
                   <span>
                     <span className="font-medium text-slate-900">Quick scan + deep research</span>
                     <span className="block text-xs text-slate-500">
-                      Best {settings.deepResearchPerRun ?? 40} (score {settings.deepResearchMinScore ?? 50}+) get full research and emails.
+                      Best {settings.deepResearchPerRun ?? 40} (score {settings.deepResearchMinScore ?? 50}+) get full research and emails written for {T.many}.
                     </span>
                   </span>
                 </label>
@@ -244,7 +255,7 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
             <p className="text-xs text-slate-500">
               {mode === 'upgrade'
                 ? 'Each one takes about a minute on free AI plans. You can close this window — it keeps going on the server.'
-                : <>Each run skips investors already in your list and searches already used, so the next run finds new people. You have {existingInvestors.length} so far.</>}
+                : <>Each run skips {T.many} already in your list and searches already used, so the next run finds new people. You have {existingInvestors.length} so far.</>}
             </p>
             <div className="flex justify-end gap-2">
               {campaign && campaign.status !== 'done' && (
@@ -264,6 +275,12 @@ export const AutonomousRunnerModal: React.FC<Props> = ({ isOpen, onClose, startu
           </div>
         ) : campaign ? (
           <div className="my-5 space-y-4">
+            {otherRun && (
+              <div className="text-xs rounded-lg border border-sky-200 bg-sky-50 text-sky-900 px-3 py-2">
+                This run is looking for <b>{otherRun.many}</b>. It keeps going in the background — switch the dropdown at the top to "{otherRun.menu}" to see what it finds.
+                {running ? ' Only one run at a time: pause it or let it finish before starting one for this list.' : ''}
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
               {stats.map(([l, v]) => (
                 <div key={l as string} className="rounded-lg border border-slate-200 p-2.5">

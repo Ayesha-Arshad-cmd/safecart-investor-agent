@@ -11,7 +11,8 @@ import {
   Trash2,
   Eye
 } from 'lucide-react';
-import { Investor, OutreachStatus } from '../types';
+import { Investor, OutreachStatus, Audience } from '../types';
+import { textFor } from '../data/audience';
 
 interface TwentyTableProps {
   investors: Investor[];
@@ -19,6 +20,7 @@ interface TwentyTableProps {
   onUpdateStatus: (id: string, newStatus: OutreachStatus) => void;
   onUpdateFollowUp: (id: string, newDate: string) => void;
   onDeleteInvestor: (id: string) => void;
+  audience?: Audience;
 }
 
 export const TwentyTable: React.FC<TwentyTableProps> = ({
@@ -26,18 +28,20 @@ export const TwentyTable: React.FC<TwentyTableProps> = ({
   onOpenInvestorDetail,
   onUpdateStatus,
   onUpdateFollowUp,
-  onDeleteInvestor
+  onDeleteInvestor,
+  audience = 'investors'
 }) => {
+  const T = textFor(audience);
   return (
     <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider">
-              <th className="py-3 px-3.5 font-medium">Investor</th>
-              <th className="py-3 px-3 font-medium">Stage</th>
+              <th className="py-3 px-3.5 font-medium">{T.One}</th>
+              <th className="py-3 px-3 font-medium">{T.field.stage}</th>
               <th className="py-3 px-3 font-medium">Fit</th>
-              <th className="py-3 px-3 font-medium">Portfolio</th>
+              <th className="py-3 px-3 font-medium">{T.field.portfolio}</th>
               <th className="py-3 px-3 font-medium">Status</th>
               <th className="py-3 px-3 font-medium">Follow-up</th>
               <th className="py-3 px-3 font-medium text-right">Actions</th>
@@ -138,7 +142,7 @@ export const TwentyTable: React.FC<TwentyTableProps> = ({
                     <button
                       onClick={() => onOpenInvestorDetail(inv)}
                       className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer"
-                      title="Open full investor dossier"
+                      title="Open full profile"
                     >
                       <Eye className="w-3.5 h-3.5" />
                     </button>
@@ -165,7 +169,7 @@ export const TwentyTable: React.FC<TwentyTableProps> = ({
                     <button
                       onClick={() => onDeleteInvestor(inv.id)}
                       className="p-1.5 text-slate-500 hover:text-red-700 hover:bg-red-100 rounded transition-colors cursor-pointer"
-                      title="Delete investor"
+                      title={`Delete ${T.one}`}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

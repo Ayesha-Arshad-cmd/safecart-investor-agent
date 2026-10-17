@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Mail, Send, Copy, Check, RotateCw, CheckCircle2, AlertCircle, FileSpreadsheet, Clock, Linkedin, MessageSquareReply, Loader2, CalendarClock, ExternalLink, Zap, Pause, Play, Search } from 'lucide-react';
 import { Investor, StartupProfile, AppSettings, HealthInfo, AutomationStatus } from '../types';
+import { audienceOf, textFor } from '../data/audience';
 import { exportToMauticCsv } from '../services/crmStorage';
 import { api, gmailComposeUrl, mailtoUrl, linkedinSearchUrl, addDays, todayIso } from '../services/api';
 
@@ -18,6 +19,7 @@ type Filter = 'due' | 'ready' | 'linkedin' | 'accepted' | 'contacted' | 'all';
 const CLOSED = ['replied', 'meeting', 'diligence', 'passed'];
 
 export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settings, health, onUpdateInvestor, onOpenInvestorDetail, showToast }) => {
+  const T = textFor(audienceOf(settings));
   const today = todayIso();
   const isDue = (i: Investor) => !!i.outreach.nextFollowUpDate && i.outreach.nextFollowUpDate <= today && !CLOSED.includes(i.outreach.status);
   const isReady = (i: Investor) => i.outreach.sentStepsCount === 0 && !i.outreach.linkedinRequestSentAt && !CLOSED.includes(i.outreach.status) && i.fitScore.status !== 'cold';
@@ -58,6 +60,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
   const [auto, setAuto] = useState<AutomationStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [researching, setResearching] = useState(false);
+  const [manualEmail, setManualEmail] = useState('');
   useEffect(() => {
     let alive = true;
     const load = () => api.automationStatus().then(r => alive && setAuto(r)).catch(() => {});
@@ -188,6 +191,18 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
   const toggleAutoPause = () => {
     if (!selected) return;
     onUpdateInvestor({ ...selected, outreach: { ...selected.outreach, autoPaused: !selected.outreach.autoPaused } }, true);
+  };
+
+  const saveManualEmail = () => {
+    if (!selected) return;
+    const e = manualEmail.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(e)) {
+      showToast('That does not look like an email address', true);
+      return;
+    }
+    onUpdateInvestor({ ...selected, email: e, contactRoute: 'Email', updatedAt: new Date().toISOString() }, true);
+    setManualEmail('');
+    showToast(`Saved ${e} for ${selected.name}`);
   };
 
   const researchDeeply = async () => {
@@ -338,7 +353,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
                 ? 'No new acceptances yet. They appear here automatically when LinkedIn emails you.'
                 : investors.length
                 ? 'Nothing in this list.'
-                : 'No investors yet — run the agent first.'}
+                : `No ${T.many} yet — run the agent first.`}
             </div>
           )}
           {list.map(inv => (
@@ -386,7 +401,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
                   {selected.email && selected.researchDepth !== 'quick' && settings.autoEmailEnabled && selected.fitScore.total >= settings.autoEmailMinScore && (
                     <button onClick={toggleAutoPause} className="mt-1.5 flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 cursor-pointer">
                       {selected.outreach.autoPaused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
-                      {selected.outreach.autoPaused ? 'Auto-email paused for this investor — resume' : 'Auto-email on for this investor — pause'}
+                      {selected.outreach.autoPaused ? `Auto-email paused for this ${T.one} — resume` : `Auto-email on for this ${T.one} — pause`}
                     </button>
                   )}
                   {selected.outreach.autoError && <div className="mt-1 text-xs text-red-600">Last auto-email failed: {selected.outreach.autoError}</div>}
@@ -595,7 +610,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
                     <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
                       {selected.researchDepth === 'quick' ? (
                         <p>
-                          <b>Not researched yet</b> — quick-scanned investors haven't had their website checked, so there's no email yet.
+                          <b>Not researched yet</b> — quick-scanned {T.many} haven't had their website checked, so there's no email yet.
                         </p>
                       ) : (selected.emailSearchV || 0) < 2 ? (
                         <p>
@@ -603,7 +618,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
                         </p>
                       ) : (
                         <p>
-                          <b>This investor doesn't publish an email.</b> Many don't. Use the LinkedIn note above
+                          <b>This {T.one} doesn't publish an email.</b> Many don't. Use the LinkedIn note above
                           {selected.website ? (
                             <>
                               , or the contact / pitch form on{' '}
@@ -624,7 +639,37 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
                           {researching ? 'Looking… (about a minute)' : selected.researchDepth === 'quick' ? 'Research deeply & find email' : 'Look again for an email'}
                         </button>
                       )}
-                      <p className="text-amber-700">Tip: to do many at once, click Find investors → "Research the ones I already have".</p>
+                      <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-200">
+                        {selected.website && (
+                          <a
+                            href={`https://hunter.io/search/${(() => {
+                              try {
+                                return new URL(selected.website).hostname.replace(/^www\./, '');
+                              } catch {
+                                return '';
+                              }
+                            })()}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-2.5 py-1 rounded-md border border-amber-300 bg-white hover:bg-amber-100 text-amber-900 font-medium"
+                          >
+                            Look up on Hunter.io (free)
+                          </a>
+                        )}
+                        <input
+                          value={manualEmail}
+                          onChange={e => setManualEmail(e.target.value)}
+                          placeholder="Paste an email you found"
+                          className="flex-1 min-w-[180px] bg-white border border-amber-300 rounded-md px-2 py-1 text-slate-900 focus:outline-none focus:border-amber-500"
+                        />
+                        <button
+                          onClick={saveManualEmail}
+                          className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-900 text-white font-medium cursor-pointer"
+                        >
+                          Save email
+                        </button>
+                      </div>
+                      <p className="text-amber-700">Tip: to do many at once, click {T.find} → "Research the ones I already have".</p>
                     </div>
                   )}
                 </div>

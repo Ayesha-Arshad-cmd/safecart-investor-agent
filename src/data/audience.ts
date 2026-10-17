@@ -1,0 +1,84 @@
+/**
+ * Who the agent is looking for. Picked from the dropdown at the top of the app.
+ *   investors → people and funds who could invest in the company
+ *   experts   → fundraising experts who could HELP the company raise (consultants, advisors,
+ *               pitch-deck / financial-model specialists, fractional CFOs, startup lawyers, boutique bankers)
+ * Every saved contact remembers which list it belongs to (Investor.audience), so the two lists never mix.
+ * Shared by the server (searches, scoring, emails) and the app (labels).
+ */
+import type { Audience } from '../types';
+export type { Audience };
+
+export const audienceOf = (x?: { audience?: string } | null): Audience => (x?.audience === 'experts' ? 'experts' : 'investors');
+
+export const AUDIENCE_TEXT = {
+  investors: {
+    menu: 'Investors',
+    one: 'investor',
+    many: 'investors',
+    One: 'Investor',
+    Many: 'Investors',
+    find: 'Find investors',
+    // fit-score bars
+    fit: { thesis: 'Thesis', stage: 'Stage', sector: 'Sector', check: 'Check size', synergy: 'Synergy' },
+    // profile fields
+    field: { check: 'Check size', portfolio: 'Portfolio', thesis: 'Thesis', stage: 'Stage', why: 'Why they may invest' }
+  },
+  experts: {
+    menu: 'Fundraising experts',
+    one: 'expert',
+    many: 'experts',
+    One: 'Expert',
+    Many: 'Experts',
+    find: 'Find experts',
+    fit: { thesis: 'Specialty', stage: 'Stage fit', sector: 'Sector experience', check: 'Cost fit', synergy: 'Track record' },
+    field: { check: 'Fees', portfolio: 'Past clients', thesis: 'Services', stage: 'Stages they help', why: 'Why they could help' }
+  }
+} as const;
+
+export const textFor = (a: Audience) => AUDIENCE_TEXT[a];
+
+/** Kinds of fundraising expert (stored in Investor.investorType for the experts list). */
+export const EXPERT_TYPES = [
+  'Fundraising Consultant',
+  'Fundraising Advisor',
+  'Pitch Deck Consultant',
+  'Fractional CFO',
+  'Startup Lawyer',
+  'Investment Banker',
+  'Startup Advisor'
+] as const;
+
+const EXPERT_ROLES = [
+  'fundraising consultant',
+  'fundraising advisor',
+  'startup fundraising coach',
+  'pitch deck consultant',
+  'fractional cfo',
+  'startup advisor',
+  'capital raising advisor'
+];
+
+/** Search plan for fundraising experts. kw = themes from "Your App" (e.g. kids fintech), city = your city. */
+export function expertQueries(kw: string[], city: string): { linkedin: string[]; web: string[] } {
+  const k = kw.length ? kw : ['consumer apps', 'fintech', 'edtech'];
+  const pick = (i: number) => k[i % k.length];
+  const linkedin = EXPERT_ROLES.map((r, i) => `site:linkedin.com/in "${r}" ${i % 2 ? '"pre-seed"' : `"${pick(i)}"`}`);
+  const place = city || 'United States';
+  const web = [
+    'startup fundraising consultant pre-seed seed round',
+    `fundraising consultant for startups ${pick(0)}`,
+    'fundraising coach for founders seed round',
+    'pitch deck consultant for startups investors',
+    'startup financial model consultant fundraising',
+    `fractional CFO startups fundraising ${place}`,
+    `startup lawyer SAFE seed round ${place}`,
+    'boutique investment bank early stage startups capital raise',
+    // experts who publish a way to email them (they sell a service, so many do)
+    '"fundraising consultant" "contact" email startups',
+    '"book a call" fundraising advisor startups',
+    `fundraising advisor consumer apps ${pick(1)} startups`,
+    'top fundraising consultants for startups'
+  ];
+  return { linkedin, web };
+}

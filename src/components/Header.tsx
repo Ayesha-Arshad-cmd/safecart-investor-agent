@@ -1,6 +1,7 @@
 import React from 'react';
 import { Search, Users, Mail, BarChart3, Settings, Play, Building2, HelpCircle, ShoppingCart } from 'lucide-react';
-import { StartupProfile, HealthInfo } from '../types';
+import { StartupProfile, HealthInfo, Audience } from '../types';
+import { textFor } from '../data/audience';
 
 export type TabId = 'brain' | 'discovery' | 'scoring' | 'crm' | 'outreach';
 
@@ -15,6 +16,9 @@ interface HeaderProps {
   totalInvestorsCount: number;
   hotLeadsCount: number;
   dueCount: number;
+  audience: Audience;
+  onChangeAudience: (a: Audience) => void;
+  audienceCounts: Record<Audience, number>;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -27,8 +31,12 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenRunnerModal,
   totalInvestorsCount,
   hotLeadsCount,
-  dueCount
+  dueCount,
+  audience,
+  onChangeAudience,
+  audienceCounts
 }) => {
+  const T = textFor(audience);
   const tab = (id: TabId, icon: React.ReactNode, label: string, badge?: React.ReactNode) => (
     <button
       onClick={() => setActiveTab(id)}
@@ -54,8 +62,19 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div className="min-w-0 leading-tight">
               <div className="font-semibold text-slate-900 text-base truncate">{startup.name}</div>
-              <div className="text-xs text-slate-500">Investor Agent</div>
+              <div className="text-xs text-slate-500">Fundraising Agent</div>
             </div>
+            <label className="flex items-center gap-1.5 ml-1 sm:ml-3 min-w-0" title="Choose what the agent looks for. You can switch any time — each has its own list.">
+              <span className="hidden lg:inline text-xs text-slate-500 whitespace-nowrap">Looking for</span>
+              <select
+                value={audience}
+                onChange={e => onChangeAudience(e.target.value as Audience)}
+                className="max-w-[11rem] sm:max-w-none bg-emerald-50 border border-emerald-300 text-emerald-900 text-sm font-semibold rounded-lg pl-2.5 pr-7 py-1.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-300"
+              >
+                <option value="investors">Investors ({audienceCounts.investors})</option>
+                <option value="experts">Fundraising experts ({audienceCounts.experts})</option>
+              </select>
+            </label>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -87,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors cursor-pointer"
             >
               <Play className="w-4 h-4 fill-current" />
-              <span className="hidden sm:inline">Find investors</span>
+              <span className="hidden sm:inline">{T.find}</span>
             </button>
           </div>
         </div>
@@ -104,7 +123,7 @@ export const Header: React.FC<HeaderProps> = ({
           {tab(
             'crm',
             <Users className="w-4 h-4" />,
-            'Investors',
+            T.Many,
             <span className="text-xs px-1.5 rounded-full bg-slate-100 text-slate-600">{totalInvestorsCount}</span>
           )}
           {tab(

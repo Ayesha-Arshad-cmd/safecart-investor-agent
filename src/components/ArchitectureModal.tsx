@@ -8,9 +8,9 @@ interface ArchitectureModalProps {
 
 const STEPS = [
   ['1 · Your app', 'Reads your website and the details you entered.'],
-  ['2 · Search', 'Looks for investors on LinkedIn and across the web.'],
-  ['3 · Research', "Reads each investor's website and finds their LinkedIn."],
-  ['4 · Score', 'Gives each investor a fit score from 0 to 100.'],
+  ['2 · Search', 'Looks for investors — or fundraising experts, if you pick that in the dropdown at the top — on LinkedIn and across the web.'],
+  ['3 · Research', "Reads each person's website and finds their LinkedIn."],
+  ['4 · Score', 'Gives each one a fit score from 0 to 100.'],
   ['5 · Write', 'Drafts a LinkedIn note and 4 follow-up emails.'],
   ['6 · Track', 'Reminds you when a follow-up is due.']
 ];
@@ -24,7 +24,7 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({ isOpen, on
         <div className="flex items-center justify-between border-b border-slate-200 pb-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">How the agent works</h2>
-            <p className="text-xs text-slate-500">From your app to investor replies, in six steps.</p>
+            <p className="text-xs text-slate-500">From your app to replies, in six steps. Works the same for investors and fundraising experts — each has its own list.</p>
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-900 p-1 rounded-md hover:bg-slate-100 cursor-pointer">
             <X className="w-5 h-5" />

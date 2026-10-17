@@ -9,7 +9,8 @@ import { DiscoveryTab } from './components/DiscoveryTab';
 import { TwentyCrmTab } from './components/TwentyCrmTab';
 import { AiScoringTab } from './components/AiScoringTab';
 import { MauticCampaignsTab } from './components/MauticCampaignsTab';
-import { Investor, StartupProfile, AppSettings, OutreachStatus, HealthInfo } from './types';
+import { Investor, StartupProfile, AppSettings, OutreachStatus, HealthInfo, Audience } from './types';
+import { audienceOf, textFor } from './data/audience';
 import {
   loadStoredInvestors,
   saveStoredInvestors,
@@ -24,6 +25,8 @@ import { CheckCircle2, AlertTriangle, Lock } from 'lucide-react';
 
 const sameInvestor = (a: Investor, b: Investor) =>
   a.id === b.id ||
+  (audienceOf(a) === audienceOf(b) && sameContact(a, b));
+const sameContact = (a: Investor, b: Investor) =>
   (a.name.toLowerCase() === b.name.toLowerCase() && a.firm.toLowerCase() === b.firm.toLowerCase()) ||
   (!!a.linkedin && a.linkedin === b.linkedin);
 
@@ -157,6 +160,21 @@ export default function App() {
     return () => window.clearInterval(t);
   }, [loaded, needsPassword, serverReachable, pullServer]);
 
+  // ---------- which list we're working on (dropdown at the top) — saved with the settings
+  const audience: Audience = audienceOf(settings);
+  const T = textFor(audience);
+  const visible = investors.filter(i => audienceOf(i) === audience);
+  const audienceCounts: Record<Audience, number> = {
+    investors: investors.filter(i => audienceOf(i) === 'investors').length,
+    experts: investors.filter(i => audienceOf(i) === 'experts').length
+  };
+  const changeAudience = (a: Audience) => {
+    if (a === audience) return;
+    setSettings(prev => ({ ...prev, audience: a }));
+    setSelectedDetailId(null);
+    showToast(a === 'experts' ? 'Now working on fundraising experts' : 'Now working on investors');
+  };
+
   // ---------- CRM mutations
   const handleUpdateInvestor = (updated: Investor, quiet = false) => {
     touch(updated.id);
@@ -164,7 +182,8 @@ export default function App() {
     if (!quiet) showToast(`Updated ${updated.name}`);
   };
 
-  const handleAddInvestor = (newInv: Investor, quiet = false) => {
+  const handleAddInvestor = (added: Investor, quiet = false) => {
+    const newInv: Investor = { ...added, audience: added.audience || audience };
     setInvestors(prev => {
       const existing = prev.find(i => sameInvestor(i, newInv));
       if (existing) {
@@ -176,7 +195,7 @@ export default function App() {
       touch(newInv.id);
       return [newInv, ...prev];
     });
-    if (!quiet) showToast(`Added ${newInv.name}${newInv.firm && !/independent/i.test(newInv.firm) ? ` (${newInv.firm})` : ''} to CRM`);
+    if (!quiet) showToast(`Added ${newInv.name}${newInv.firm && !/independent/i.test(newInv.firm) ? ` (${newInv.firm})` : ''} to your ${textFor(audienceOf(newInv)).many} list`);
   };
 
   const patchOutreach = (id: string, patch: Partial<Investor['outreach']>) => {
@@ -188,20 +207,23 @@ export default function App() {
   const handleUpdateFollowUp = (id: string, nextFollowUpDate: string) => patchOutreach(id, { nextFollowUpDate });
 
   const handleDeleteInvestor = (id: string) => {
-    if (!confirm('Remove this investor from your CRM?')) return;
+    if (!confirm(`Remove this ${T.one} from your list?`)) return;
     deletedIds.current.add(id);
     dirtyIds.current.delete(id);
     setInvestors(prev => prev.filter(inv => inv.id !== id));
-    showToast('Investor removed');
+    showToast(`${T.One} removed`);
   };
 
+  // Clears only the list you're looking at (investors OR experts), never both.
   const handleClearCrm = () => {
-    if (!confirm('Delete ALL investors from the CRM? This cannot be undone (export a CSV first if you want a backup).')) return;
-    clearAll.current = true;
-    investors.forEach(i => deletedIds.current.add(i.id));
-    dirtyIds.current.clear();
-    setInvestors([]);
-    showToast('CRM cleared');
+    if (!confirm(`Delete ALL ${visible.length} ${T.many} from your list? Your ${audience === 'experts' ? 'investors' : 'fundraising experts'} are not touched. This cannot be undone (export a CSV first if you want a backup).`)) return;
+    const ids = new Set(visible.map(i => i.id));
+    ids.forEach(id => {
+      deletedIds.current.add(id);
+      dirtyIds.current.delete(id);
+    });
+    setInvestors(prev => prev.filter(i => !ids.has(i.id)));
+    showToast(`${T.Many} list cleared`);
   };
 
   const handleSaveStartup = (updated: StartupProfile, msg?: string) => {
@@ -221,15 +243,16 @@ export default function App() {
     await loadFromServer();
   };
 
-  const hotLeadsCount = investors.filter(i => i.fitScore.status === 'hot').length;
+  const hotLeadsCount = visible.filter(i => i.fitScore.status === 'hot').length;
   const today = new Date().toISOString().slice(0, 10);
-  const dueCount = investors.filter(
+  const dueCount = visible.filter(
     i => i.outreach.nextFollowUpDate && i.outreach.nextFollowUpDate <= today && !['replied', 'meeting', 'diligence', 'passed'].includes(i.outreach.status)
   ).length;
   const selectedDetailInvestor = investors.find(i => i.id === selectedDetailId) || null;
   const openDetail = (inv: Investor) => setSelectedDetailId(inv.id);
 
-  const common = { startup, settings, investors, onOpenInvestorDetail: openDetail, showToast };
+  // every tab only sees the list chosen in the dropdown
+  const common = { startup, settings, investors: visible, onOpenInvestorDetail: openDetail, showToast };
 
   return (
     <div className="min-h-screen bg-[#f4f6fa] text-slate-900 flex flex-col font-sans">
@@ -270,9 +293,12 @@ export default function App() {
         onOpenArchitectureModal={() => setIsArchitectureModalOpen(true)}
         onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
         onOpenRunnerModal={() => setIsRunnerModalOpen(true)}
-        totalInvestorsCount={investors.length}
+        totalInvestorsCount={visible.length}
         hotLeadsCount={hotLeadsCount}
         dueCount={dueCount}
+        audience={audience}
+        onChangeAudience={changeAudience}
+        audienceCounts={audienceCounts}
       />
 
       {serverReachable === false && (
@@ -286,7 +312,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full">
+      <main key={audience} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full">
         {activeTab === 'brain' && (
           <ProductBrainTab {...common} onSaveStartup={handleSaveStartup} onOpenRunnerModal={() => setIsRunnerModalOpen(true)} goTo={setActiveTab} />
         )}
@@ -296,7 +322,7 @@ export default function App() {
         {activeTab === 'scoring' && <AiScoringTab {...common} onUpdateInvestor={handleUpdateInvestor} />}
         {activeTab === 'crm' && (
           <TwentyCrmTab
-            investors={investors}
+            investors={visible}
             startup={startup}
             onOpenInvestorDetail={openDetail}
             onUpdateStatus={handleUpdateStatus}
@@ -304,13 +330,14 @@ export default function App() {
             onDeleteInvestor={handleDeleteInvestor}
             onAddInvestor={inv => handleAddInvestor(inv)}
             onClearCrm={handleClearCrm}
+            audience={audience}
           />
         )}
         {activeTab === 'outreach' && <MauticCampaignsTab {...common} health={health} onUpdateInvestor={handleUpdateInvestor} />}
       </main>
 
       <footer className="py-5 text-center text-xs text-slate-400">
-        {startup.name} Investor Agent
+        {startup.name} Fundraising Agent · {T.menu}
       </footer>
 
       <ArchitectureModal isOpen={isArchitectureModalOpen} onClose={() => setIsArchitectureModalOpen(false)} />
@@ -320,11 +347,11 @@ export default function App() {
         onClose={() => setIsRunnerModalOpen(false)}
         startup={startup}
         settings={settings}
-        existingInvestors={investors}
+        existingInvestors={visible}
         onRefresh={pullServer}
         onStartupIntel={intel => handleSaveStartup({ ...startup, ...intel }, '')}
         onCompletePipeline={count => {
-          showToast(`Agent finished: ${count} investors added to your CRM`);
+          showToast(`Agent finished: ${count} ${T.many} added to your list`);
           setActiveTab('crm');
         }}
       />

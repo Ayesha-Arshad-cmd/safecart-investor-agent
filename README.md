@@ -57,6 +57,8 @@ The build and start commands are already set in `railway.json` (`npm run build` 
 
 ## Using it
 
+**Investors or fundraising experts?** Use the **Looking for** dropdown at the top. *Investors* finds people and funds who could invest. *Fundraising experts* finds people who can help you raise (fundraising consultants and advisors, pitch-deck and financial-model experts, fractional CFOs, startup lawyers, boutique bankers). Each has its own list, scores and emails, and you can switch any time. Settings (auto-email, limits) apply to both lists.
+
 1. **Your App tab:** check the facts, add the raise amount, real traction and the founder's name, then click **Analyse with AI**.
 2. Click **Find investors**, pick how many (50 / 100 / 150 / 200) and click **Start**.
    - The agent quick-scans everyone it finds and adds them to your list straight away.

@@ -19,6 +19,7 @@ import {
   Save 
 } from 'lucide-react';
 import { Investor, OutreachStatus, StartupProfile, AppSettings } from '../types';
+import { audienceOf, textFor } from '../data/audience';
 import { api, gmailComposeUrl } from '../services/api';
 
 interface InvestorDetailModalProps {
@@ -54,6 +55,7 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
   const [deepening, setDeepening] = useState(false);
 
   if (!isOpen || !investor) return null;
+  const T = textFor(audienceOf(investor));
 
   const handleSaveNotes = () => {
     const updated: Investor = {
@@ -291,23 +293,23 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
 
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
                   <div className="bg-white p-2.5 rounded border border-slate-200">
-                    <div className="text-[11px] text-slate-500 font-medium">THESIS</div>
+                    <div className="text-[11px] text-slate-500 font-medium uppercase">{T.fit.thesis}</div>
                     <div className="text-base font-bold text-slate-900">{investor.fitScore.thesisMatch}%</div>
                   </div>
                   <div className="bg-white p-2.5 rounded border border-slate-200">
-                    <div className="text-[11px] text-slate-500 font-medium">STAGE</div>
+                    <div className="text-[11px] text-slate-500 font-medium uppercase">{T.fit.stage}</div>
                     <div className="text-base font-bold text-slate-900">{investor.fitScore.stageMatch}%</div>
                   </div>
                   <div className="bg-white p-2.5 rounded border border-slate-200">
-                    <div className="text-[11px] text-slate-500 font-medium">SECTOR</div>
+                    <div className="text-[11px] text-slate-500 font-medium uppercase">{T.fit.sector}</div>
                     <div className="text-base font-bold text-slate-900">{investor.fitScore.sectorMatch}%</div>
                   </div>
                   <div className="bg-white p-2.5 rounded border border-slate-200">
-                    <div className="text-[11px] text-slate-500 font-medium">CHECK SIZE</div>
+                    <div className="text-[11px] text-slate-500 font-medium uppercase">{T.fit.check}</div>
                     <div className="text-base font-bold text-slate-900">{investor.fitScore.checkSizeMatch}%</div>
                   </div>
                   <div className="bg-white p-2.5 rounded border border-slate-200 col-span-2 sm:col-span-1">
-                    <div className="text-[11px] text-slate-500 font-medium">SYNERGY</div>
+                    <div className="text-[11px] text-slate-500 font-medium uppercase">{T.fit.synergy}</div>
                     <div className="text-base font-bold text-emerald-600">{investor.fitScore.synergyMatch}%</div>
                   </div>
                 </div>
@@ -321,7 +323,7 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3.5">
                   <h4 className="text-xs font-semibold text-emerald-600 mb-2 flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5" /> Why they'd invest
+                    <Check className="w-3.5 h-3.5" /> {T.field.why}
                   </h4>
                   <ul className="space-y-1.5 text-slate-700">
                     {investor.fitScore.whyInvest.map((reason, idx) => (
@@ -361,7 +363,7 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
               {/* Portfolio & Industries */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                  <span className="text-slate-500 block text-xs font-medium mb-1.5">Portfolio</span>
+                  <span className="text-slate-500 block text-xs font-medium mb-1.5">{T.field.portfolio}</span>
                   <div className="flex flex-wrap gap-1.5">
                     {investor.portfolio.map((p, idx) => (
                       <span key={idx} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs">

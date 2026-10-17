@@ -13,7 +13,26 @@ export type OutreachStatus =
 
 export type InvestmentStage = 'Pre-seed' | 'Seed' | 'Series A' | 'Growth' | 'All Stages' | 'Unknown';
 
-export type InvestorType = 'Angel' | 'VC Fund' | 'Micro-VC' | 'Family Office' | 'Angel Group' | 'Accelerator' | 'Corporate VC' | 'Other';
+export type InvestorType =
+  | 'Angel'
+  | 'VC Fund'
+  | 'Micro-VC'
+  | 'Family Office'
+  | 'Angel Group'
+  | 'Accelerator'
+  | 'Corporate VC'
+  | 'Other'
+  // fundraising experts (the "Fundraising experts" list)
+  | 'Fundraising Consultant'
+  | 'Fundraising Advisor'
+  | 'Pitch Deck Consultant'
+  | 'Fractional CFO'
+  | 'Startup Lawyer'
+  | 'Investment Banker'
+  | 'Startup Advisor';
+
+/** Which list a contact belongs to (dropdown at the top of the app). Missing = 'investors'. */
+export type Audience = 'investors' | 'experts';
 
 export interface EmailSequenceStep {
   stepNumber: number;
@@ -84,6 +103,8 @@ export interface Investor {
   linkedinMessage?: string;
   /** 'quick' = scored from search results only; 'deep' = website researched + outreach written. */
   researchDepth?: 'quick' | 'deep';
+  /** 'investors' (default) or 'experts' — which list this contact belongs to */
+  audience?: Audience;
   /** version of the email finder that last looked for this investor's email */
   emailSearchV?: number;
   /** Search-snippet score from the quick scan (0-100). */
@@ -185,6 +206,9 @@ export interface AppSettings {
 
   // ---- LinkedIn ----
   linkedinDailyLimit: number;
+
+  /** What the app is looking for right now (dropdown at the top). Missing = 'investors'. */
+  audience?: Audience;
 }
 
 export interface CampaignCandidate extends DiscoveryCandidate {
@@ -203,6 +227,8 @@ export interface Campaign {
   status: 'running' | 'paused' | 'done' | 'error';
   target: number;
   mode: 'quick' | 'deep' | 'upgrade';
+  /** who this run looks for */
+  audience?: Audience;
   startedAt: string;
   finishedAt?: string;
   phase: 'queries' | 'search' | 'extract' | 'quick' | 'deep' | 'done';
@@ -244,6 +270,8 @@ export interface DiscoveryCandidate {
   whyRelevant: string;
   location: string;
   alreadyInCrm?: boolean;
+  /** which list it was found for */
+  audience?: Audience;
 }
 
 export interface AgentJob {

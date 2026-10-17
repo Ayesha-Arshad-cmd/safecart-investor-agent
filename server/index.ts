@@ -12,6 +12,7 @@ import { aiConfigured, aiProviderNames } from './ai';
 import { searchProviderNames, webSearch } from './search';
 import { emailProvider, sendEmail } from './email';
 import { loadState, saveState, storageInfo, flushNow, mergeInvestors, clearInvestors } from './store';
+import { audienceOf } from '../src/data/audience';
 import { startCampaign, startUpgrade, getCampaign, pauseCampaign, resumeCampaign, resumeOnBoot } from './campaign';
 import { startAutomation, runAutomationNow, automationStatus } from './automation';
 import {
@@ -187,7 +188,7 @@ route('POST', '/api/discover', async body => {
     queries = body.mode === 'linkedin' ? d.linkedin : body.mode === 'web' ? d.web : [...d.linkedin.slice(0, 3), ...d.web.slice(0, 3)];
   }
   const logs: string[] = [];
-  const { candidates, rawResults } = await discoverCandidates(body.startup, queries.slice(0, 10), body.existing || [], (_p, m) => logs.push(m));
+  const { candidates, rawResults } = await discoverCandidates(body.startup, queries.slice(0, 10), body.existing || [], (_p, m) => logs.push(m), audienceOf(body.settings));
   return { candidates, resultsSearched: rawResults.length, queries, logs };
 });
 

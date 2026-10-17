@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Brain, Sparkles, Save, Loader2, Play, Upload, Linkedin, Globe, AlertTriangle, RotateCcw } from 'lucide-react';
 import { StartupProfile, AppSettings, Investor, InvestmentStage } from '../types';
+import { audienceOf, textFor } from '../data/audience';
 import { api } from '../services/api';
 import { DEFAULT_STARTUP } from '../data/defaultStartup';
 import type { TabId } from './Header';
@@ -124,7 +125,7 @@ export const ProductBrainTab: React.FC<Props> = ({ startup, settings, investors,
             onClick={onOpenRunnerModal}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg cursor-pointer"
           >
-            <Play className="w-3.5 h-3.5 fill-current" /> Find investors
+            <Play className="w-3.5 h-3.5 fill-current" /> {textFor(audienceOf(settings)).find}
           </button>
         </div>
       </div>
