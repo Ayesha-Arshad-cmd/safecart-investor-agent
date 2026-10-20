@@ -83,7 +83,7 @@ export const api = {
     call<{ fitScore: InvestorFitScore; researchNotes: string }>('POST', '/api/score', { startup, investor }),
 
   outreach: (startup: StartupProfile, investor: Investor, settings: AppSettings) =>
-    call<{ sequences: EmailSequenceStep[]; linkedinNote: string; linkedinMessage: string }>('POST', '/api/outreach', { startup, investor, settings }),
+    call<{ sequences: EmailSequenceStep[]; linkedinNote: string; linkedinMessage: string; templateV?: number }>('POST', '/api/outreach', { startup, investor, settings }),
 
   findLinkedIn: (name: string, firm: string) => call<{ linkedin: string }>('POST', '/api/linkedin/find', { name, firm }),
 
@@ -103,8 +103,12 @@ export const api = {
   automationStatus: () => call<AutomationStatus>('GET', '/api/automation/status'),
   runAutomation: () => call<AutomationStatus>('POST', '/api/automation/run'),
 
-  sendEmail: (to: string, subject: string, body: string, replyTo?: string, fromName?: string) =>
-    call<{ ok: boolean; error?: string }>('POST', '/api/email/send', { to, subject, body, replyTo, fromName }),
+  sendEmail: (to: string, subject: string, body: string, replyTo?: string, fromName?: string, label?: string) =>
+    call<{ ok: boolean; error?: string }>('POST', '/api/email/send', { to, subject, body, replyTo, fromName, label }),
+
+  /** Creates a Google Sheet of the chosen list in your Google Drive and returns its link. */
+  sheet: (audience: 'investors' | 'experts', includeHidden = false) =>
+    call<{ url: string; rows: number }>('POST', '/api/sheet', { audience, includeHidden }),
 
   runAgent: (startup: StartupProfile, settings: AppSettings, investors: Investor[], refreshProduct = false) =>
     call<{ jobId: string }>('POST', '/api/agent/run', { startup, settings, existing: existingOf(investors), refreshProduct }),

@@ -5,12 +5,19 @@
  *   • sends investor emails FROM your own Gmail (they appear in your Sent folder)
  *   • finds investor replies in your inbox (so follow-ups stop automatically)
  *   • finds LinkedIn "… accepted your invitation" emails (so the app knows who accepted)
+ *   • tags every investor / expert email thread with a Gmail label ("Investor" or "Fundraising Expert"),
+ *     so you can tell them apart in your inbox — replies stay in the same tagged thread
+ *   • creates a Google Sheet of your list in your Google Drive ("Open in Google Sheets" button)
  *
  * Setup (5 minutes) — see README "Automatic email (Gmail script)":
  *   1. Go to https://script.google.com → New project → paste this whole file.
  *   2. Change SECRET below to a long random password (same value as GMAIL_SCRIPT_SECRET on Railway).
  *   3. Deploy → New deployment → type "Web app" → Execute as: Me → Who has access: Anyone → Deploy.
  *   4. Allow the Gmail permissions, copy the Web app URL into Railway as GMAIL_SCRIPT_URL.
+ *
+ * UPDATING an older copy: paste this whole file again, Save, run "doGet" once (▶ Run) and click Allow
+ * (Google asks again because the script can now make Sheets), then Deploy → Manage deployments →
+ * ✏ Edit → Version: New version → Deploy. The web app URL stays the same.
  *
  * Limits (set by Google): about 100 emails/day on a normal Gmail, 1,500/day on Google Workspace.
  */
@@ -28,7 +35,8 @@ function doPost(e) {
     if (req.secret !== SECRET) return json_({ ok: false, error: 'Wrong secret' });
     if (req.action === 'send') return json_(send_(req));
     if (req.action === 'check') return json_(check_(req));
-    if (req.action === 'quota') return json_({ ok: true, remaining: MailApp.getRemainingDailyQuota() });
+    if (req.action === 'quota') return json_({ ok: true, remaining: MailApp.getRemainingDailyQuota(), version: 2 });
+    if (req.action === 'sheet') return json_(sheet_(req));
     return json_({ ok: false, error: 'Unknown action' });
   } catch (err) {
     return json_({ ok: false, error: String(err) });
@@ -46,6 +54,13 @@ function send_(req) {
   if (req.fromName) opts.name = req.fromName;
   if (req.replyTo) opts.replyTo = req.replyTo;
   const message = GmailApp.createDraft(req.to, req.subject, req.body, opts).send();
+  if (req.label) {
+    try {
+      message.getThread().addLabel(label_(req.label));
+    } catch (err) {
+      /* the email is sent; a missing label is not worth failing for */
+    }
+  }
   return {
     ok: true,
     messageId: message.getId(),
@@ -57,6 +72,7 @@ function send_(req) {
 function check_(req) {
   const days = Math.max(1, Math.min(180, Number(req.days) || 60));
   const emails = (req.emails || []).map(function (x) { return String(x).toLowerCase().trim(); }).filter(String);
+  const tags = req.tags || {}; // email -> Gmail label name ("Investor" / "Fundraising Expert")
   const replies = [];
   for (let i = 0; i < emails.length; i += 20) {
     const chunk = emails.slice(i, i + 20);
@@ -67,6 +83,13 @@ function check_(req) {
         const match = raw.match(/<([^>]+)>/);
         const from = (match ? match[1] : raw).toLowerCase().trim();
         if (chunk.indexOf(from) !== -1) {
+          if (tags[from]) {
+            try {
+              thread.addLabel(label_(tags[from]));
+            } catch (err) {
+              /* ignore */
+            }
+          }
           replies.push({ email: from, date: m.getDate().toISOString(), subject: m.getSubject(), snippet: m.getPlainBody().slice(0, 300) });
         }
       });
@@ -80,4 +103,26 @@ function check_(req) {
     if (found) accepted.push({ name: found[1].trim(), date: m.getDate().toISOString() });
   });
   return { ok: true, replies: replies, accepted: accepted, remaining: MailApp.getRemainingDailyQuota() };
+}
+
+function label_(name) {
+  return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
+}
+
+/** Creates a Google Sheet in your Drive from the app's list and returns its link. */
+function sheet_(req) {
+  const headers = req.headers || [];
+  const rows = req.rows || [];
+  if (!headers.length) return { ok: false, error: 'Nothing to export' };
+  const ss = SpreadsheetApp.create(String(req.title || 'SafeCart Kids list'));
+  const sh = ss.getSheets()[0];
+  sh.setName(String(req.tab || 'List').slice(0, 90));
+  const data = [headers].concat(rows.map(function (r) {
+    return headers.map(function (_h, i) { return r[i] == null ? '' : String(r[i]).slice(0, 49000); });
+  }));
+  sh.getRange(1, 1, data.length, headers.length).setValues(data);
+  sh.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#e8f5ee');
+  sh.setFrozenRows(1);
+  sh.autoResizeColumns(1, Math.min(headers.length, 8));
+  return { ok: true, url: ss.getUrl(), id: ss.getId(), rows: rows.length };
 }

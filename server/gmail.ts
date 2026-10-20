@@ -40,22 +40,22 @@ export async function gmailSend(
   to: string,
   subject: string,
   body: string,
-  opts: { replyTo?: string; fromName?: string } = {}
+  opts: { replyTo?: string; fromName?: string; label?: string } = {}
 ): Promise<{ ok: boolean; threadId?: string; remaining?: number; error?: string }> {
   try {
-    const r = await call({ action: 'send', to, subject, body, replyTo: opts.replyTo, fromName: opts.fromName });
+    const r = await call({ action: 'send', to, subject, body, replyTo: opts.replyTo, fromName: opts.fromName, label: opts.label });
     return { ok: true, threadId: r.threadId, remaining: r.remaining };
   } catch (e: any) {
     return { ok: false, error: String(e?.message || e) };
   }
 }
 
-export async function gmailCheck(emails: string[], days = 60): Promise<{
+export async function gmailCheck(emails: string[], days = 60, tags: Record<string, string> = {}): Promise<{
   replies: { email: string; date: string; subject: string; snippet: string }[];
   accepted: { name: string; date: string }[];
   remaining?: number;
 }> {
-  const r = await call({ action: 'check', emails, days }, 120000);
+  const r = await call({ action: 'check', emails, days, tags }, 120000);
   return { replies: r.replies || [], accepted: r.accepted || [], remaining: r.remaining };
 }
 
@@ -64,5 +64,17 @@ export async function gmailQuota(): Promise<number | undefined> {
     return (await call({ action: 'quota' }, 20000)).remaining;
   } catch {
     return undefined;
+  }
+}
+
+/** Creates a Google Sheet in the founder's Drive (needs the updated helper script). */
+export async function gmailSheet(title: string, tab: string, headers: string[], rows: (string | number)[][]): Promise<{ url: string; rows: number }> {
+  try {
+    const r = await call({ action: 'sheet', title, tab, headers, rows }, 120000);
+    return { url: r.url, rows: r.rows };
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    if (/Unknown action/i.test(msg)) throw new Error('Your Gmail helper script is the old version — paste the new google-apps-script/Code.gs and deploy a new version (see README).');
+    throw e;
   }
 }

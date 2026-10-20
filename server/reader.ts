@@ -11,6 +11,8 @@ export interface PageContent {
   description: string;
   text: string;
   emails: string[];
+  /** US-format phone numbers published on the page, e.g. "(480) 555-0123" */
+  phones?: string[];
   links: { href: string; text: string }[];
   via: 'direct' | 'jina' | 'failed';
   error?: string;
@@ -79,6 +81,23 @@ function unObfuscate(text: string): string {
     .replace(/\b([a-z0-9._%+-]+)\s+at\s+([a-z0-9-]+)\s+dot\s+([a-z]{2,})\b/gi, '$1@$2.$3');
 }
 
+/** US phone numbers in text / tel: links → "(480) 555-0123". Skips things that look like dates or ids. */
+export function extractPhones(text: string): string[] {
+  const out: string[] = [];
+  const re = /(?:\+?1[\s.-]?)?\(?([2-9]\d{2})\)?[\s.-]?([2-9]\d{2})[\s.-]?(\d{4})(?!\d)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) && out.length < 10) {
+    const before = text[m.index - 1] || ' ';
+    if (/[\d\/A-Za-z]/.test(before)) continue; // part of a longer number, id or url
+    const raw = m[0];
+    // must look like a phone: separators, parentheses or a tel: link — not a bare 10-digit id
+    if (!/[\s.()+-]/.test(raw) && !/tel:[^\d]*$/i.test(text.slice(Math.max(0, m.index - 6), m.index))) continue;
+    if (m[2] === '555' && /^01\d\d$/.test(m[3])) continue; // fictional 555-01xx numbers
+    out.push(`(${m[1]}) ${m[2]}-${m[3]}`);
+  }
+  return [...new Set(out)];
+}
+
 export function extractEmails(text: string): string[] {
   const found = (unObfuscate(text).match(EMAIL_RE) || []).map(e => e.toLowerCase().replace(/\.$/, ''));
   return [...new Set(found.filter(e => !JUNK_EMAIL.test(e)))].slice(0, 10);
@@ -123,7 +142,8 @@ export function htmlToContent(html: string, url: string): Omit<PageContent, 'via
     .trim();
 
   const hidden = decodeCloudflareEmails(html);
-  return { url, title, description, text: body, emails: extractEmails([...mailtos, ...hidden].join(' ') + ' ' + body), links };
+  const tels = [...html.matchAll(/href=["']tel:([^"']+)["']/gi)].map(x => 'tel:' + decodeURIComponent(x[1]));
+  return { url, title, description, text: body, emails: extractEmails([...mailtos, ...hidden].join(' ') + ' ' + body), phones: extractPhones(tels.join(' ') + ' ' + body), links };
 }
 
 async function viaJina(url: string): Promise<PageContent> {
@@ -135,7 +155,7 @@ async function viaJina(url: string): Promise<PageContent> {
   const md = await res.text();
   const title = md.match(/^Title:\s*(.+)$/m)?.[1]?.trim() || '';
   const links = [...md.matchAll(/\[([^\]]{1,80})\]\((https?:\/\/[^)\s]+)\)/g)].slice(0, 300).map(x => ({ text: x[1], href: x[2] }));
-  return { url, title, description: '', text: md, emails: extractEmails(md), links, via: 'jina' };
+  return { url, title, description: '', text: md, emails: extractEmails(md), phones: extractPhones(md), links, via: 'jina' };
 }
 
 /** Fetch a page; never throws. */

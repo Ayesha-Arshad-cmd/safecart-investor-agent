@@ -78,9 +78,17 @@ export interface Investor {
   investorType?: InvestorType;
   website: string;
   email: string;
+  /** Public phone number found on their own website (US format), if any. */
+  phone?: string;
   linkedin: string;
   twitter?: string;
   location: string;
+  /** Country they are based in, as found by the research (we target the USA). */
+  country?: string;
+  /** Do they ask founders for money BEFORE anything happens (retainer, application / pitch / membership fee)? */
+  upfrontFee?: 'yes' | 'no' | 'unknown';
+  /** How they get paid, in one line (e.g. "success fee only", "$5k/month retainer", "$250 pitch fee"). */
+  feeModel?: string;
   stage: InvestmentStage;
   checkSizeFormatted: string;
   checkSizeMin: number;
@@ -120,6 +128,8 @@ export interface Investor {
     responseNotes?: string;
     replyDate?: string;
     sentStepsCount: number;
+    /** version of the email template used to write the sequence (older ones are rewritten before auto-sending) */
+    templateV?: number;
     linkedinRequestSentAt?: string;
     linkedinAcceptedAt?: string;
     linkedinMessagedAt?: string;

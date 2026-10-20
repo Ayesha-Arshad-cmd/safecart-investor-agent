@@ -22,11 +22,12 @@ export async function sendEmail(
   subject: string,
   body: string,
   replyTo?: string,
-  fromName?: string
+  fromName?: string,
+  label?: string
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return { ok: false, error: 'Invalid recipient email' };
   if (emailProvider() === 'gmail') {
-    const r = await gmailSend(to, subject, body, { replyTo, fromName });
+    const r = await gmailSend(to, subject, body, { replyTo, fromName, label });
     return r.ok ? { ok: true, id: r.threadId } : { ok: false, error: r.error };
   }
   if (emailProvider() !== 'brevo') return { ok: false, error: 'No email sender set up (add the Gmail helper script, or BREVO_API_KEY + SENDER_EMAIL).' };

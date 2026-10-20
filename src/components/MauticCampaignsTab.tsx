@@ -2,6 +2,29 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Mail, Send, Copy, Check, RotateCw, CheckCircle2, AlertCircle, FileSpreadsheet, Clock, Linkedin, MessageSquareReply, Loader2, CalendarClock, ExternalLink, Zap, Pause, Play, Search } from 'lucide-react';
 import { Investor, StartupProfile, AppSettings, HealthInfo, AutomationStatus } from '../types';
 import { audienceOf, textFor } from '../data/audience';
+import { openInGoogleSheets } from '../services/sheets';
+
+/** Coloured "Investor" / "Fundraising Expert" tag — same words as the Gmail label on the email thread. */
+const TagChip: React.FC<{ label: string }> = ({ label }) => (
+  <span
+    className={`inline-block px-1.5 py-px rounded text-[10px] font-bold uppercase tracking-wide ${
+      label === 'Investor' ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-800'
+    }`}
+  >
+    {label}
+  </span>
+);
+/** Activity lines start with "[Investor]" / "[Fundraising Expert]" — show that as a chip. */
+const withTag = (msg: string) => {
+  const m = msg.match(/^\[(Investor|Fundraising Expert)\]\s*/);
+  return m ? (
+    <>
+      <TagChip label={m[1]} /> {msg.slice(m[0].length)}
+    </>
+  ) : (
+    msg
+  );
+};
 import { exportToMauticCsv } from '../services/crmStorage';
 import { api, gmailComposeUrl, mailtoUrl, linkedinSearchUrl, addDays, todayIso } from '../services/api';
 
@@ -60,6 +83,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
   const [auto, setAuto] = useState<AutomationStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const [researching, setResearching] = useState(false);
+  const [sheetBusy, setSheetBusy] = useState(false);
   const [manualEmail, setManualEmail] = useState('');
   useEffect(() => {
     let alive = true;
@@ -144,7 +168,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
     if (!selected?.email || !step) return;
     setBusy('send');
     try {
-      const r = await api.sendEmail(selected.email, subject, body, startup.founderEmail || settings.senderEmail || undefined);
+      const r = await api.sendEmail(selected.email, subject, body, startup.founderEmail || settings.senderEmail || undefined, undefined, textFor(audienceOf(selected)).label);
       if (!r.ok) throw new Error(r.error);
       markSent(' via Brevo');
     } catch (e: any) {
@@ -231,6 +255,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
         outreach: {
           ...selected.outreach,
           sequenceGenerated: true,
+          templateV: o.templateV,
           sequences: o.sequences.map(s => ({ ...s, sentAt: sequences.find(x => x.stepNumber === s.stepNumber)?.sentAt }))
         }
       });
@@ -264,8 +289,17 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
           <h1 className="text-xl font-semibold text-slate-900">Outreach</h1>
           <p className="text-sm text-slate-500 mt-0.5">Send messages and keep track of follow-ups.</p>
         </div>
-        <button onClick={exportCsv} className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-sm font-semibold rounded-lg cursor-pointer shrink-0">
-          <FileSpreadsheet className="w-3.5 h-3.5" /> Export CSV
+        <button
+          onClick={async () => {
+            setSheetBusy(true);
+            await openInGoogleSheets(audienceOf(settings), exportCsv, showToast);
+            setSheetBusy(false);
+          }}
+          disabled={sheetBusy}
+          title="Create a Google Sheet of this list in your Google Drive and open it"
+          className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-sm font-semibold rounded-lg cursor-pointer shrink-0 disabled:opacity-60"
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5" /> {sheetBusy ? 'Creating sheet…' : 'Open in Google Sheets'}
         </button>
       </div>
 
@@ -310,7 +344,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
               <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
                 {auto.recent.map((r, k) => (
                   <li key={k} className={r.level === 'error' ? 'text-red-600' : r.level === 'warn' ? 'text-amber-700' : r.level === 'success' ? 'text-emerald-700' : ''}>
-                    {new Date(r.at).toLocaleString()} — {r.message}
+                    {new Date(r.at).toLocaleString()} — {withTag(r.message)}
                   </li>
                 ))}
               </ul>
@@ -375,6 +409,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
                 <span className="px-1.5 rounded bg-slate-100 text-purple-700">{inv.outreach.status}</span>
                 {inv.researchDepth === 'quick' && <span className="px-1.5 rounded bg-slate-100 text-slate-500">quick scan</span>}
                 {isAccepted(inv) && <span className="px-1.5 rounded bg-sky-100 text-sky-700">accepted</span>}
+                {inv.outreach.status === 'replied' && <TagChip label={textFor(audienceOf(inv)).label} />}
                 {inv.outreach.sentStepsCount > 0 && <span className="text-slate-500">{inv.outreach.sentStepsCount}/{inv.outreach.sequences.length} sent</span>}
                 {inv.outreach.nextFollowUpDate && !CLOSED.includes(inv.outreach.status) && (
                   <span className={isDue(inv) ? 'text-amber-700' : 'text-slate-500'}>next {inv.outreach.nextFollowUpDate}</span>
@@ -393,10 +428,12 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-base font-bold text-slate-900">{selected.name}</h3>
+                    <TagChip label={textFor(audienceOf(selected)).label} />
                     <span className="text-xs text-slate-500">{selected.firm}</span>
                   </div>
                   <div className="text-xs text-slate-500 mt-0.5 truncate">
-                    {selected.email || 'no public email found'} · {selected.contactRoute}
+                    {selected.email || 'no public email found'}
+                    {selected.phone ? ` · ☎ ${selected.phone}` : ''} · {selected.contactRoute}
                   </div>
                   {selected.email && selected.researchDepth !== 'quick' && settings.autoEmailEnabled && selected.fitScore.total >= settings.autoEmailMinScore && (
                     <button onClick={toggleAutoPause} className="mt-1.5 flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 cursor-pointer">

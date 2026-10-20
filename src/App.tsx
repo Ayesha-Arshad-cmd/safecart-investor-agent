@@ -163,15 +163,21 @@ export default function App() {
   // ---------- which list we're working on (dropdown at the top) — saved with the settings
   const audience: Audience = audienceOf(settings);
   const T = textFor(audience);
-  const visible = investors.filter(i => audienceOf(i) === audience);
+  // people who ask for money upfront are filtered out of every tab (the list tab can show them on request)
+  const [showUpfront, setShowUpfront] = useState(false);
+  const asksUpfront = (i: Investor) => i.upfrontFee === 'yes';
+  const inList = investors.filter(i => audienceOf(i) === audience);
+  const hiddenUpfront = inList.filter(asksUpfront).length;
+  const visible = showUpfront ? inList : inList.filter(i => !asksUpfront(i));
   const audienceCounts: Record<Audience, number> = {
-    investors: investors.filter(i => audienceOf(i) === 'investors').length,
-    experts: investors.filter(i => audienceOf(i) === 'experts').length
+    investors: investors.filter(i => audienceOf(i) === 'investors' && !asksUpfront(i)).length,
+    experts: investors.filter(i => audienceOf(i) === 'experts' && !asksUpfront(i)).length
   };
   const changeAudience = (a: Audience) => {
     if (a === audience) return;
     setSettings(prev => ({ ...prev, audience: a }));
     setSelectedDetailId(null);
+    setShowUpfront(false);
     showToast(a === 'experts' ? 'Now working on fundraising experts' : 'Now working on investors');
   };
 
@@ -331,6 +337,10 @@ export default function App() {
             onAddInvestor={inv => handleAddInvestor(inv)}
             onClearCrm={handleClearCrm}
             audience={audience}
+            showToast={showToast}
+            hiddenCount={hiddenUpfront}
+            showHidden={showUpfront}
+            onToggleHidden={() => setShowUpfront(v => !v)}
           />
         )}
         {activeTab === 'outreach' && <MauticCampaignsTab {...common} health={health} onUpdateInvestor={handleUpdateInvestor} />}

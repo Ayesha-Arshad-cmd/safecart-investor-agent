@@ -14,6 +14,8 @@ export const audienceOf = (x?: { audience?: string } | null): Audience => (x?.au
 export const AUDIENCE_TEXT = {
   investors: {
     menu: 'Investors',
+    /** Gmail label put on the email thread (sent + replies) */
+    label: 'Investor',
     one: 'investor',
     many: 'investors',
     One: 'Investor',
@@ -26,6 +28,7 @@ export const AUDIENCE_TEXT = {
   },
   experts: {
     menu: 'Fundraising experts',
+    label: 'Fundraising Expert',
     one: 'expert',
     many: 'experts',
     One: 'Expert',
@@ -78,7 +81,12 @@ export function expertQueries(kw: string[], city: string): { linkedin: string[];
     '"fundraising consultant" "contact" email startups',
     '"book a call" fundraising advisor startups',
     `fundraising advisor consumer apps ${pick(1)} startups`,
-    'top fundraising consultants for startups'
+    'top fundraising consultants for startups',
+    // paid from results, not upfront
+    '"success fee" fundraising consultant startups',
+    'commission based fundraising consultant pre-seed startups',
+    '"no retainer" startup fundraising advisor',
+    '"success-based" capital raising advisor seed round'
   ];
   return { linkedin, web };
 }

@@ -10,6 +10,8 @@
  */
 import { chatJson } from './ai';
 import { Audience, audienceOf, expertQueries, EXPERT_TYPES } from '../src/data/audience';
+import { targetGeo, geoRule, withGeo, outsideTarget } from '../src/data/geo';
+import { TEMPLATE_V, INVESTOR_MODEL_EMAIL, INVESTOR_RULES, EXPERT_MODEL_EMAIL, expertRules } from '../src/data/emailTemplates';
 import { webSearch, SearchResult, isLinkedInProfile, normalizeLinkedInUrl } from './search';
 import { readPage, pickUsefulSubpages, canFetch, extractEmails, PageContent } from './reader';
 import type {
@@ -103,6 +105,9 @@ export function startupBrief(s: StartupProfile): string {
   return lines.filter(Boolean).join('\n');
 }
 
+/** People who want money from the founder BEFORE anything happens are filtered out. */
+const NO_UPFRONT_RULE = `MONEY RULE: we do NOT work with anyone who asks the founder to pay before anything happens — retainers, monthly fees, application / pitch / membership / listing fees, "due diligence" fees, paid programs or paid investor-matching. Investors who invest, and experts paid only from results (success fee / commission on money actually raised), are fine.`;
+
 const HONESTY_RULES = `Honesty rules (very important):
 - Never invent traction, revenue, users, pilots, partnerships, quotes or metrics. Only use facts given to you.
 - Never invent investors, people, emails, portfolio companies or URLs. If something is unknown, use "" or [].
@@ -119,7 +124,8 @@ export async function analyzeProduct(s: StartupProfile, settings?: Partial<AppSe
       if (p.text) siteText += `\n\nPAGE ${p.url}\n${p.text}`;
     }
   }
-  const geo = settings?.geographyFocus || 'United States';
+  const tg = targetGeo(s.location);
+  const geo = `ONLY the ${tg.country}${tg.state ? ` (extra weight on ${tg.state})` : ''} — every query must aim at the ${tg.country}`;
   const local = settings?.includeLocalAngelGroups !== false;
 
   const out = await chatJson<any>(
@@ -173,6 +179,12 @@ Return JSON:
 }
 
 export function defaultQueries(s: StartupProfile, settings?: Partial<AppSettings>): { linkedin: string[]; web: string[] } {
+  const g = targetGeo(s.location);
+  const q = rawDefaultQueries(s, settings);
+  return { linkedin: [...new Set(q.linkedin.map(x => withGeo(x, g)))], web: [...new Set(q.web.map(x => withGeo(x, g)))] };
+}
+
+function rawDefaultQueries(s: StartupProfile, settings?: Partial<AppSettings>): { linkedin: string[]; web: string[] } {
   if (isExp(settings?.audience)) {
     const city = (s.location || '').split(',').slice(0, 2).map(x => x.trim()).join(' ').trim();
     return expertQueries((s.investorKeywords || []).slice(0, 5), settings?.includeLocalAngelGroups !== false ? city : '');
@@ -246,6 +258,7 @@ export async function extractCandidates(
   audience: Audience = 'investors'
 ): Promise<DiscoveryCandidate[]> {
   const exp = isExp(audience);
+  const geo = targetGeo(s.location);
   // Read a few "list of investors" pages: they name many investors at once.
   const listPages: PageContent[] = [];
   for (const r of results.filter(looksLikeList).slice(0, maxListPages)) {
@@ -295,10 +308,14 @@ export async function extractCandidates(
         exp
           ? `You extract REAL, specific FUNDRAISING EXPERTS from search results — people or small firms who help startups raise money. ${HONESTY_RULES}
 Only include someone if the evidence text itself names them AND shows they help startups raise capital: fundraising consultant / advisor / coach, pitch deck consultant, financial-model consultant, fractional CFO who supports raises, startup lawyer for financings (SAFEs, seed rounds), boutique investment banker or placement agent for early-stage raises.
-Skip investors who only invest, journalists, recruiters, generic articles, software tools, and the startup itself.`
+Skip investors who only invest, journalists, recruiters, generic articles, software tools, and the startup itself.
+${geoRule(geo)}
+${NO_UPFRONT_RULE} Skip anyone whose evidence shows they charge founders upfront.`
           : `You extract REAL, specific investors from search results for a startup's fundraising. ${HONESTY_RULES}
 Only include an investor if the evidence text itself names them AND indicates they invest (angel, VC, partner, fund, angel group, family office, accelerator).
-Skip journalists, founders who are not investors, recruiters, generic articles, and the startup itself.`,
+Skip journalists, founders who are not investors, recruiters, generic articles, and the startup itself.
+${geoRule(geo)}
+${NO_UPFRONT_RULE} Skip anyone whose evidence shows they charge founders upfront (e.g. angel groups with application or pitch fees).`,
         `STARTUP:\n${startupBrief(s).slice(0, 1800)}
 
 EVIDENCE (id | url | text):
@@ -309,7 +326,8 @@ Return JSON: {"investors":[{
  "firm": ${exp ? '"their consultancy / company, or \\"Independent\\""' : '"fund / firm / angel group, or \\"Independent Angel\\""'},
  "title": ${exp ? '"e.g. Fundraising Consultant, Founder, Fractional CFO, Partner"' : '"e.g. Partner, Angel Investor, Managing Director"'},
  "investorType": "${typeList(audience)}",
- "location": "",
+ "location": "city, state / country if shown in the evidence, else \\"\\"",
+ "country": "country they are based in if shown, else \\"\\"",
  "evidenceId": "the [id] where you saw them",
  "websiteUrl": "${exp ? 'their own website' : 'firm website'} ONLY if it appears in the evidence, else \\"\\"",
  "whyRelevant": "one sentence: ${exp ? 'how they could help' : 'why they may fit'} ${s.name}, based on the evidence"
@@ -324,6 +342,7 @@ Return JSON: {"investors":[{
     for (const c of Array.isArray(parsed?.investors) ? parsed.investors : []) {
       const name = str(c.name, 120);
       if (!name || name.length < 3) continue;
+      if (outsideTarget(`${str(c.country, 80)} ${str(c.location, 120)}`, geo)) continue; // not in the target country
       const firm = str(c.firm, 120) || (exp ? 'Independent' : 'Independent Angel');
       const key = normKey(name) + '|' + normKey(firm);
       if (seen.has(key) || seenNames.has(normKey(name))) continue;
@@ -492,11 +511,25 @@ const OUTREACH_SPEC = (s: StartupProfile, settings?: Partial<AppSettings>, audie
   "linkedinNote": "LinkedIn connection request note, MAX 280 characters, personal, no links",
   "linkedinMessage": "LinkedIn DM to send after they accept, 60-110 words"
 }
-Outreach rules: write as ${senderName(s, settings)} from ${s.name}. ${
+Outreach rules: write as ${senderName(s, settings)}, founder of ${s.name} (use the company name "${s.name}" and the sender name "${senderName(s, settings)}" wherever the model email has its own names).
+${
   isExp(audience)
-    ? `This person is a FUNDRAISING EXPERT, not an investor — do not pitch them to invest. Email 1 is 80-130 words, opens with something SPECIFIC to them (a client they helped, their service or their content FROM THE EVIDENCE), one-line description of ${s.name} and where we are in our raise, why them, and a soft ask: a 15-min call to see whether they could help with our round and how they usually work with founders. Never promise fees or terms.`
-    : `Email 1 is 80-130 words, opens with something SPECIFIC to this investor (their thesis or a portfolio company FROM THE EVIDENCE), one-line pitch, why them, a soft ask (15-min call or deck).`
-} Follow-ups are shorter and add new value. Final email politely closes the loop. Plain text, no placeholders like [Name] except [Calendly link] / [Deck link] if needed. Do not claim traction that was not given. Sign off with "${senderName(s, settings)}".`;
+    ? `This person is a FUNDRAISING EXPERT, not an investor — never pitch them to invest.
+MODEL EXPERT EMAIL (copy its structure, facts and terms; change only the names and add the one personal sentence):
+"""
+${EXPERT_MODEL_EMAIL}
+"""
+${expertRules()}
+Follow-ups (emails 2-4) are 40-90 words, refer back to the partnership offer (same terms, nothing new), and the last one politely closes the loop.
+LinkedIn note: mention we're looking for a fundraising partner on a performance basis (success fee, no upfront fees).`
+    : `MODEL INVESTOR EMAIL (copy its structure and tone; change only the names and add the one personal sentence):
+"""
+${INVESTOR_MODEL_EMAIL}
+"""
+${INVESTOR_RULES}
+Follow-ups (emails 2-4) are 40-90 words, add one new useful point each, and the last one politely closes the loop.`
+}
+Plain text, no placeholders like [Name]. Do not claim traction, users, revenue or partners that were not given in the startup profile.`;
 
 export async function researchCandidate(
   s: StartupProfile,
@@ -528,6 +561,7 @@ export async function researchCandidate(
   }
 
   const emails = new Set<string>();
+  const phones: string[] = []; // contact page first, then the rest
   let crawl = { title: '', description: '', excerpt: '', url: website };
   if (website && canFetch(website)) {
     const home = await readPage(website, 6000);
@@ -535,6 +569,7 @@ export async function researchCandidate(
       sources.add(home.url);
       crawl = { title: home.title, description: home.description, excerpt: home.text.slice(0, 1500), url: home.url };
       home.emails.forEach(e => emails.add(e));
+      phones.push(...(home.phones || []));
       evidence.push(`WEBSITE ${home.url} — ${home.title}\n${home.description}\n${home.text}`);
       const subs = pickUsefulSubpages(home, 3);
       // no contact link on the home page? most sites still have /contact
@@ -550,6 +585,8 @@ export async function researchCandidate(
         if (p.text) {
           sources.add(p.url);
           p.emails.forEach(e => emails.add(e));
+          if (/contact/i.test(p.url)) phones.unshift(...(p.phones || []));
+          else phones.push(...(p.phones || []));
           evidence.push(`PAGE ${p.url}\n${p.text.slice(0, 3000)}`);
         }
       }
@@ -583,7 +620,7 @@ export async function researchCandidate(
   // an email seen in the search result that led us here counts too (same-domain rule applies below)
   extractEmails(`${c.sourceTitle || ''} ${c.snippet || ''}`).forEach(e => emails.add(e));
 
-  const evidenceText = evidence.join('\n\n---\n\n').slice(0, 9000);
+  const evidenceText = evidence.join('\n\n---\n\n').slice(0, 8000);
   const emailList = [...emails];
 
   const out = await chatJson<any>(
@@ -600,6 +637,10 @@ EVIDENCE COLLECTED FROM THE PUBLIC WEB:
 ${evidenceText}
 
 Emails found on their site: ${emailList.join(', ') || 'none'}
+Phones found on their site: ${[...new Set(phones)].slice(0, 4).join(', ') || 'none'}
+
+${geoRule(targetGeo(s.location))}
+${NO_UPFRONT_RULE}
 
 Return JSON:
 {
@@ -619,7 +660,10 @@ Return JSON:
    "thesis": "their stated thesis, from evidence", "contactRoute": "best legitimate route: e.g. 'Email partner', 'Website pitch form', 'LinkedIn connection', 'Warm intro preferred'",
    "email": "ONLY an email from the list above that belongs to this investor/firm, else \\"\\"",`
    }
-   "twitter": "", "keyQuotes": ["short quotes copied from evidence"]
+   "twitter": "", "keyQuotes": ["short quotes copied from evidence"],
+   "country": "country they are based in, from evidence, else \\"\\"",
+   "upfrontFee": "yes | no | unknown — yes ONLY if evidence shows founders must pay them before anything happens (retainer, monthly fee, application / pitch / membership fee, paid program, due-diligence fee)",
+   "feeModel": "${exp ? 'how they charge, from evidence (e.g. success fee only, commission on funds raised, retainer + success fee, hourly), else Unknown' : 'any fee they charge founders (e.g. pitch fee, membership), else None'}"
  },
  "isRealInvestor": true/false (${exp ? 'false if evidence suggests they do NOT actually help startups raise money' : 'false if evidence suggests this is not an active investor'}),
  "fit": {"thesisMatch":0-100,"stageMatch":0-100,"sectorMatch":0-100,"checkSizeMatch":0-100,"synergyMatch":0-100,"total":0-100,
@@ -629,9 +673,8 @@ Return JSON:
 }
 ${
   exp
-    ? `Fit fields for an expert: thesisMatch = how much they specialise in startup fundraising; stageMatch = they help pre-seed/seed companies; sectorMatch = experience with consumer / kids / family / fintech / edtech; checkSizeMatch = affordable for a pre-seed startup (Unknown fees = 50); synergyMatch = track record and investor network shown in evidence.
-Scoring guide: 80+ = clearly helps early-stage consumer startups raise, with evidence of results; 55-79 = general startup fundraising help; <55 = weak, unclear, late-stage only or big-company only. Be strict when evidence is thin.
-If they charge a success fee for introducing investors, add a hesitation: "Success fees for investor intros may require a registered broker-dealer in the US — check before signing."`
+    ? `Fit fields for an expert: thesisMatch = how much they specialise in startup fundraising; stageMatch = they help pre-seed/seed companies; sectorMatch = experience with consumer / kids / family / fintech / edtech; checkSizeMatch = cost fit: 90+ if paid only from results (success fee / commission on money raised, no upfront cost), 50 if unknown, 20 or less if they need a retainer or any upfront payment; synergyMatch = track record and investor network shown in evidence.
+Scoring guide: 80+ = clearly helps early-stage consumer startups raise, with evidence of results; 55-79 = general startup fundraising help; <55 = weak, unclear, late-stage only or big-company only. Be strict when evidence is thin.`
     : `Scoring guide: 80+ = clear thesis + stage match for a kids/family consumer app; 55-79 = adjacent (consumer, edtech, fintech generalist); <55 = weak/unclear. Be strict when evidence is thin.`
 }`,
     3500
@@ -647,6 +690,23 @@ If they charge a success fee for introducing investors, add a hesitation: "Succe
       ...fit.hesitations
     ].slice(0, 5);
   }
+  // Location + money rules
+  const geo = targetGeo(s.location);
+  const country = str(p.country, 80);
+  const outside = outsideTarget(`${country} ${str(p.location, 120)}`, geo);
+  if (outside) {
+    fit.total = Math.min(fit.total, 20);
+    fit.status = 'cold';
+    fit.hesitations = [`Based outside the ${geo.country} (${country || str(p.location, 80)}).`, ...fit.hesitations].slice(0, 5);
+  }
+  const upfrontFee: 'yes' | 'no' | 'unknown' = /^yes/i.test(str(p.upfrontFee)) ? 'yes' : /^no/i.test(str(p.upfrontFee)) ? 'no' : 'unknown';
+  const feeModel = str(p.feeModel, 160);
+  if (upfrontFee === 'yes') {
+    fit.total = Math.min(fit.total, 15);
+    fit.status = 'cold';
+    fit.hesitations = [`Asks for money upfront${feeModel ? ` (${feeModel})` : ''} — filtered out.`, ...fit.hesitations].slice(0, 5);
+  }
+
   const email = str(p.email, 200).toLowerCase();
   // Only keep an email that was really published AND belongs to this investor's own site (or a personal mailbox).
   const siteRoot = (() => {
@@ -674,9 +734,14 @@ If they charge a success fee for introducing investors, add a hesitation: "Succe
     audience,
     website: website || '',
     email: verifiedEmail,
+    // a phone only counts if it is on their own website
+    phone: trustedSite ? [...new Set(phones)][0] || '' : '',
     linkedin: linkedin || '',
     twitter: str(p.twitter, 80),
     location: str(p.location, 120) || c.location || '',
+    country: country || (outside ? '' : geo.country),
+    upfrontFee,
+    feeModel,
     stage: asStage(p.stage),
     checkSizeFormatted: str(p.checkSizeFormatted, 60) || 'Unknown',
     checkSizeMin: Number(p.checkSizeMin) || 0,
@@ -712,9 +777,12 @@ If they charge a success fee for introducing investors, add a hesitation: "Succe
       status: fit.status === 'hot' ? 'hot' : fit.status === 'warm' ? 'warm' : 'researched',
       sequenceGenerated: true,
       sequences: normalizeSequence(out?.outreach?.sequence),
-      sentStepsCount: 0
+      templateV: TEMPLATE_V,
+      sentStepsCount: 0,
+      // never auto-email someone who wants money upfront or is outside the target country
+      autoPaused: upfrontFee === 'yes' || outside ? true : undefined
     },
-    tags: ['AI researched', c.investorType, linkedin ? 'LinkedIn found' : ''].filter(Boolean) as string[],
+    tags: ['AI researched', c.investorType, linkedin ? 'LinkedIn found' : '', upfrontFee === 'yes' ? 'Asks for upfront fee' : '', outside ? 'Outside target country' : ''].filter(Boolean) as string[],
     researchDepth: 'deep',
     createdAt: now,
     updatedAt: now
@@ -730,6 +798,7 @@ function investorBrief(i: Investor): string {
     `Industries: ${i.industries.join(', ')}`,
     `${exp ? 'Past clients' : 'Portfolio'}: ${i.portfolio.join(', ')}`,
     `${exp ? 'Services' : 'Thesis'}: ${i.thesis}`,
+    i.feeModel ? `How they charge: ${i.feeModel}` : '',
     `Research notes: ${i.researchNotes}`,
     i.extractedData?.extractedTextExcerpt ? `Website excerpt: ${i.extractedData.extractedTextExcerpt.slice(0, 1500)}` : ''
   ].join('\n');
@@ -751,7 +820,7 @@ export async function generateOutreach(
   s: StartupProfile,
   i: Investor,
   settings?: Partial<AppSettings>
-): Promise<{ sequences: EmailSequenceStep[]; linkedinNote: string; linkedinMessage: string }> {
+): Promise<{ sequences: EmailSequenceStep[]; linkedinNote: string; linkedinMessage: string; templateV: number }> {
   const out = await chatJson<any>(
     `You are an expert fundraising copywriter for ${s.name}. ${HONESTY_RULES}`,
     `STARTUP:\n${startupBrief(s)}\n\n${isExp(i.audience) ? 'FUNDRAISING EXPERT' : 'INVESTOR'}:\n${investorBrief(i)}\nBest hook: ${i.fitScore?.keyTalkingPoint || ''}\n\nReturn JSON: {${OUTREACH_SPEC(s, settings, audienceOf(i))}}`,
@@ -760,7 +829,8 @@ export async function generateOutreach(
   return {
     sequences: normalizeSequence(out?.outreach?.sequence ?? out?.sequence),
     linkedinNote: str(out?.outreach?.linkedinNote ?? out?.linkedinNote, 300),
-    linkedinMessage: str(out?.outreach?.linkedinMessage ?? out?.linkedinMessage, 1500)
+    linkedinMessage: str(out?.outreach?.linkedinMessage ?? out?.linkedinMessage, 1500),
+    templateV: TEMPLATE_V
   };
 }
 
@@ -901,9 +971,10 @@ export async function quickScoreCandidates(
   s: StartupProfile,
   cands: { id: string; name: string; firm: string; title: string; investorType: string; snippet: string; whyRelevant: string; location: string }[],
   audience: Audience = 'investors'
-): Promise<Map<string, { score: number; reason: string; isInvestor: boolean }>> {
+): Promise<Map<string, { score: number; reason: string; isInvestor: boolean; upfront: boolean; outside: boolean }>> {
   const exp = isExp(audience);
-  const out = new Map<string, { score: number; reason: string; isInvestor: boolean }>();
+  const geo = targetGeo(s.location);
+  const out = new Map<string, { score: number; reason: string; isInvestor: boolean; upfront: boolean; outside: boolean }>();
   if (!cands.length) return out;
   const res = await chatJson<any>(
     exp
@@ -914,7 +985,9 @@ export async function quickScoreCandidates(
 CANDIDATES:
 ${cands.map((c, i) => `[${i + 1}] ${c.name} — ${c.title} @ ${c.firm} (${c.investorType}) ${c.location}\nSeen: ${c.snippet.slice(0, 300)}\nWhy found: ${c.whyRelevant}`).join('\n\n')}
 
-Return JSON: {"scores":[{"n":1,"score":0-100,"isInvestor":true/false,"reason":"one short sentence"}]} — one entry per candidate, same numbers.
+Return JSON: {"scores":[{"n":1,"score":0-100,"isInvestor":true/false,"upfrontFee":true/false,"outsideCountry":true/false,"reason":"one short sentence"}]} — one entry per candidate, same numbers.
+"upfrontFee": true ONLY if the text shows they make founders pay before anything happens (retainer, monthly fee, application / pitch / membership fee, paid program). ${NO_UPFRONT_RULE}
+"outsideCountry": true ONLY if the text shows they are based outside the ${geo.country}.
 ${
   exp
     ? `"isInvestor" here means: true if they really help startups raise money (consultant, advisor, coach, pitch deck / financial model expert, fractional CFO, startup lawyer, boutique banker); false otherwise.
@@ -926,7 +999,13 @@ Scoring: 75+ clearly helps early-stage consumer / kids / fintech / edtech startu
   for (const r of Array.isArray(res?.scores) ? res.scores : []) {
     const c = cands[Number(r?.n) - 1];
     if (!c) continue;
-    out.set(c.id, { score: clamp(r.score), reason: str(r.reason, 300), isInvestor: r.isInvestor !== false });
+    out.set(c.id, {
+      score: clamp(r.score),
+      reason: str(r.reason, 300),
+      isInvestor: r.isInvestor !== false,
+      upfront: r.upfrontFee === true,
+      outside: r.outsideCountry === true || outsideTarget(c.location, geo)
+    });
   }
   return out;
 }
@@ -942,7 +1021,7 @@ export async function generateSearchQueries(
   const res = await chatJson<any>(
     `You plan investor searches for ${s.name}. ${HONESTY_RULES}`,
     `STARTUP:\n${startupBrief(s).slice(0, 2000)}
-Geography focus: ${settings.geographyFocus || 'United States'}
+Geography: ONLY people based in the ${targetGeo(s.location).country}${targetGeo(s.location).state ? ` (extra weight on ${targetGeo(s.location).state})` : ''}. Every query must aim at the ${targetGeo(s.location).country} (name the country, a state or a city).
 
 Queries ALREADY USED (do not repeat or lightly reword them):
 ${used.slice(-120).join('\n') || '(none)'}
@@ -957,6 +1036,7 @@ Return JSON: {"queries":["..."]}`,
   const usedSet = new Set(used.map(q => q.toLowerCase().trim()));
   return arr(res?.queries, count * 2)
     .map(q => q.trim())
+    .map(q => withGeo(q, targetGeo(s.location)))
     .filter(q => q.length > 8 && !usedSet.has(q.toLowerCase()))
     .slice(0, count);
 }
@@ -965,7 +1045,8 @@ async function generateExpertQueries(s: StartupProfile, settings: Partial<AppSet
   const res = await chatJson<any>(
     `You plan searches that find FUNDRAISING EXPERTS for ${s.name}. ${HONESTY_RULES}`,
     `STARTUP:\n${startupBrief(s).slice(0, 1500)}
-Geography focus: ${settings.geographyFocus || 'United States'}
+Geography: ONLY people based in the ${targetGeo(s.location).country}${targetGeo(s.location).state ? ` (extra weight on ${targetGeo(s.location).state})` : ''}. Every query must aim at the ${targetGeo(s.location).country} (name the country, a state or a city).
+Prefer experts who work on a success fee / commission (paid from money actually raised) — avoid ones selling retainers or paid programs.
 
 Queries ALREADY USED (do not repeat or lightly reword them):
 ${used.slice(-120).join('\n') || '(none)'}
@@ -980,6 +1061,7 @@ Return JSON: {"queries":["..."]}`,
   const usedSet = new Set(used.map(q => q.toLowerCase().trim()));
   return arr(res?.queries, count * 2)
     .map(q => q.trim())
+    .map(q => withGeo(q, targetGeo(s.location)))
     .filter(q => q.length > 8 && !usedSet.has(q.toLowerCase()))
     .slice(0, count);
 }

@@ -48,6 +48,7 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
   const [nextFollowUpDate, setNextFollowUpDate] = useState(investor?.outreach.nextFollowUpDate || '');
   const [email, setEmail] = useState(investor?.email || '');
   const [linkedin, setLinkedin] = useState(investor?.linkedin || '');
+  const [phone, setPhone] = useState(investor?.phone || '');
   const [copiedStep, setCopiedStep] = useState<number | null>(null);
   const [isRescoring, setIsRescoring] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -62,6 +63,7 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
       ...investor,
       researchNotes,
       email: email.trim(),
+      phone: phone.trim(),
       linkedin: linkedin.trim(),
       outreach: {
         ...investor.outreach,
@@ -88,7 +90,7 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
         ...investor,
         linkedinNote: o.linkedinNote,
         linkedinMessage: o.linkedinMessage,
-        outreach: { ...investor.outreach, sequences: o.sequences, sequenceGenerated: true },
+        outreach: { ...investor.outreach, sequences: o.sequences, sequenceGenerated: true, templateV: o.templateV },
         updatedAt: new Date().toISOString()
       });
     } catch (e: any) {
@@ -118,6 +120,7 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
       setResearchNotes(r.investor.researchNotes || '');
       setEmail(r.investor.email || '');
       setLinkedin(r.investor.linkedin || '');
+      setPhone(r.investor.phone || '');
       onUpdateInvestor(r.investor);
       showToast(`Researched ${r.investor.name} — score ${r.investor.fitScore.total}%`);
     } catch (e: any) {
@@ -441,6 +444,26 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
                       onChange={e => setNextFollowUpDate(e.target.value)}
                       className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-900"
                     />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-500 mb-1">Phone (public)</label>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={e => setPhone(e.target.value)}
+                      placeholder="not found publicly"
+                      className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-700 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-500 mb-1">How they charge</label>
+                    <div className={`w-full rounded px-2.5 py-1.5 text-xs border ${investor.upfrontFee === 'yes' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                      {investor.feeModel || 'Unknown'}
+                      {investor.upfrontFee === 'yes' ? ' — asks for money upfront (hidden from your list, never auto-emailed)' : investor.upfrontFee === 'no' ? ' — no upfront payment' : ''}
+                    </div>
                   </div>
                 </div>
 

@@ -3,6 +3,7 @@ import { Search, ExternalLink, Sparkles, Plus, Loader2, CheckCircle2, Linkedin, 
 import { Investor, StartupProfile, AppSettings, DiscoveryCandidate } from '../types';
 import { api } from '../services/api';
 import { audienceOf, textFor, expertQueries } from '../data/audience';
+import { targetGeo, withGeo } from '../data/geo';
 
 interface DiscoveryTabProps {
   startup: StartupProfile;
@@ -28,6 +29,11 @@ export const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ startup, settings, i
   const aud = audienceOf(settings);
   const T = textFor(aud);
   const presets = useMemo(() => {
+    const g = targetGeo(startup.location);
+    return rawPresets().map(p => ({ ...p, q: withGeo(p.q, g) }));
+  }, [aud, startup.linkedinSearchQueries, startup.webSearchQueries, startup.investorKeywords, startup.location]);
+
+  function rawPresets() {
     if (aud === 'experts') {
       const city = (startup.location || '').split(',').slice(0, 2).map(x => x.trim()).join(' ');
       const q = expertQueries((startup.investorKeywords || []).slice(0, 5), city);
@@ -36,7 +42,7 @@ export const DiscoveryTab: React.FC<DiscoveryTabProps> = ({ startup, settings, i
     const li = (startup.linkedinSearchQueries || []).slice(0, 6).map(q => ({ q, mode: 'linkedin' as Mode }));
     const web = (startup.webSearchQueries || []).slice(0, 6).map(q => ({ q, mode: 'web' as Mode }));
     return [...li, ...web];
-  }, [aud, startup.linkedinSearchQueries, startup.webSearchQueries, startup.investorKeywords, startup.location]);
+  }
 
   const runSearch = async (q?: string, m: Mode = mode) => {
     setIsSearching(true);

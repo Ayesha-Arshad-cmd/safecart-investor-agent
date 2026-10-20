@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Investor, OutreachStatus, StartupProfile, Audience } from '../types';
 import { textFor } from '../data/audience';
+import { openInGoogleSheets } from '../services/sheets';
 import { TwentyTable } from './TwentyTable';
 import { TwentyKanban } from './TwentyKanban';
 import { exportInvestorsToCsv, exportToTwentyCrmJson, exportToMauticCsv } from '../services/crmStorage';
@@ -29,6 +30,11 @@ interface TwentyCrmTabProps {
   onAddInvestor: (newInv: Investor) => void;
   onClearCrm: () => void;
   audience?: Audience;
+  showToast?: (msg: string, error?: boolean) => void;
+  /** contacts hidden because they ask for money upfront */
+  hiddenCount?: number;
+  showHidden?: boolean;
+  onToggleHidden?: () => void;
 }
 
 export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
@@ -40,8 +46,13 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
   onDeleteInvestor,
   onAddInvestor,
   onClearCrm,
-  audience = 'investors'
+  audience = 'investors',
+  showToast = (m: string) => alert(m),
+  hiddenCount = 0,
+  showHidden = false,
+  onToggleHidden
 }) => {
+  const [sheetBusy, setSheetBusy] = useState(false);
   const T = textFor(audience);
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const [searchFilter, setSearchFilter] = useState('');
@@ -82,6 +93,11 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
   const contactedCount = investors.filter(i => i.outreach.status === 'contacted').length;
   const repliedCount = investors.filter(i => i.outreach.status === 'replied').length;
   const meetingCount = investors.filter(i => i.outreach.status === 'meeting').length;
+  // Public contact info: of the people we deep-researched, how many publish an email vs a phone number
+  const researched = investors.filter(i => i.researchDepth !== 'quick');
+  const pctOf = (n: number) => (researched.length ? Math.round((n / researched.length) * 100) : 0);
+  const emailPct = pctOf(researched.filter(i => !!i.email).length);
+  const phonePct = pctOf(researched.filter(i => !!i.phone).length);
 
   const handleDownloadCsv = () => {
     const csv = exportInvestorsToCsv(filteredInvestors);
@@ -192,7 +208,7 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
     <div className="space-y-5">
       
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
           <div className="text-xs text-slate-500 uppercase">Total {T.many}</div>
           <div className="text-xl font-bold text-slate-900 mt-0.5">{investors.length}</div>
@@ -216,7 +232,44 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
           <div className="text-xl font-bold text-cyan-700 mt-0.5">{meetingCount}</div>
           <div className="text-[11px] text-slate-500 mt-1">{repliedCount} replies</div>
         </div>
+
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3" title="Of the people the agent deep-researched, how many publish an email address vs a phone number">
+          <div className="text-xs text-slate-600 uppercase">Public contact info</div>
+          <div className="mt-1.5 space-y-1.5 text-[11px] text-slate-600">
+            {([['Email', emailPct, 'bg-emerald-500'], ['Phone', phonePct, 'bg-sky-500']] as const).map(([l, v, c]) => (
+              <div key={l} className="flex items-center gap-1.5">
+                <span className="w-9">{l}</span>
+                <div className="flex-1 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                  <div className={`${c} h-1.5`} style={{ width: `${v}%` }} />
+                </div>
+                <span className="w-8 text-right font-semibold text-slate-800">{v}%</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1">
+            {researched.length
+              ? emailPct === phonePct
+                ? `Same for both · ${researched.length} researched`
+                : `${emailPct > phonePct ? 'Email' : 'Phone'} is more common · ${researched.length} researched`
+              : 'No deep-researched people yet'}
+          </div>
+        </div>
       </div>
+
+      {(hiddenCount > 0 || showHidden) && (
+        <div className="text-xs rounded-lg border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+          <span>
+            {showHidden
+              ? `Showing ${hiddenCount} ${T.many} who ask for money upfront (normally hidden — they are never auto-emailed).`
+              : `${hiddenCount} ${hiddenCount === 1 ? T.one : T.many} hidden because they ask for money upfront (retainer, application or pitch fee).`}
+          </span>
+          {onToggleHidden && (
+            <button onClick={onToggleHidden} className="underline font-medium cursor-pointer">
+              {showHidden ? 'Hide them again' : 'Show them'}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Control Bar: Search, Filters, View Mode & Export */}
       <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 text-xs">
@@ -300,12 +353,17 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
           {/* Export Dropdown buttons */}
           <div className="flex items-center gap-1">
             <button
-              onClick={handleDownloadCsv}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-slate-900 transition-colors cursor-pointer"
-              title="Download full CSV"
+              onClick={async () => {
+                setSheetBusy(true);
+                await openInGoogleSheets(audience, handleDownloadCsv, showToast);
+                setSheetBusy(false);
+              }}
+              disabled={sheetBusy}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-slate-900 transition-colors cursor-pointer disabled:opacity-60"
+              title="Create a Google Sheet of this list in your Google Drive and open it"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Export CSV</span>
+              <span>{sheetBusy ? 'Creating sheet…' : 'Open in Google Sheets'}</span>
             </button>
           </div>
 

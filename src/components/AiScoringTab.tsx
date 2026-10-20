@@ -59,7 +59,7 @@ export const AiScoringTab: React.FC<AiScoringTabProps> = ({
       };
       if (!updated.outreach.sequences?.length) {
         const o = await api.outreach(startup, updated, settings);
-        updated.outreach = { ...updated.outreach, sequences: o.sequences, sequenceGenerated: true };
+        updated.outreach = { ...updated.outreach, sequences: o.sequences, sequenceGenerated: true, templateV: o.templateV };
         updated.linkedinNote = o.linkedinNote;
         updated.linkedinMessage = o.linkedinMessage;
       }

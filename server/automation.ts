@@ -12,6 +12,12 @@ import { loadState, saveState, updateInvestor } from './store';
 import { emailProvider, sendEmail } from './email';
 import { gmailConfigured, gmailCheck, gmailQuota } from './gmail';
 import type { AutomationStatus, Investor } from '../src/types';
+import { audienceOf, AUDIENCE_TEXT } from '../src/data/audience';
+import { TEMPLATE_V } from '../src/data/emailTemplates';
+import { generateOutreach } from './agent';
+
+/** "[Investor]" / "[Fundraising Expert]" — shown in activity and notes so you know who it is at a glance */
+const tagOf = (i: Investor) => `[${AUDIENCE_TEXT[audienceOf(i)].label}]`;
 
 const TICK_MS = () => Number(process.env.AUTOMATION_TICK_MS || 5 * 60_000);
 const CHECK_EVERY_MS = () => Number(process.env.AUTOMATION_CHECK_MS || 15 * 60_000);
@@ -101,14 +107,41 @@ async function sendDue() {
   const founderName = st.startup?.founderName || '';
   const replyTo = st.startup?.founderEmail || cfg.senderEmail || undefined;
 
-  for (const { inv, step } of due) {
+  for (const { inv: found, step } of due) {
     if (budget <= 0) break;
+    let inv = found;
+    // first email written with an older template? rewrite it with the current model email before sending
+    if (step === 0 && (inv.outreach.templateV || 1) < TEMPLATE_V) {
+      try {
+        const o = await generateOutreach(st.startup, inv, st.settings);
+        if (o.sequences.length) {
+          updateInvestor(inv.id, i => ({
+            ...i,
+            linkedinNote: o.linkedinNote || i.linkedinNote,
+            linkedinMessage: o.linkedinMessage || i.linkedinMessage,
+            outreach: { ...i.outreach, sequences: o.sequences, sequenceGenerated: true, templateV: o.templateV }
+          }));
+          inv = loadState().investors.find((x: Investor) => x.id === inv.id) || inv;
+          note('info', `${tagOf(inv)} Rewrote the emails for ${inv.name} with the new template before sending.`);
+        }
+      } catch (e: any) {
+        note('warn', `${tagOf(inv)} Could not rewrite the emails for ${inv.name} yet (${String(e?.message || e).slice(0, 80)}) — will try again later.`);
+        continue;
+      }
+    }
     const seq = inv.outreach.sequences[step];
-    const res = await sendEmail(inv.email, seq.subject, withFooter(seq.body, startupName, cfg, founderName), replyTo, cfg.senderName || founderName || undefined);
+    const res = await sendEmail(
+      inv.email,
+      seq.subject,
+      withFooter(seq.body, startupName, cfg, founderName),
+      replyTo,
+      cfg.senderName || founderName || undefined,
+      AUDIENCE_TEXT[audienceOf(inv)].label
+    );
     if (!res.ok) {
       const err = res.error || 'send failed';
       updateInvestor(inv.id, i => ({ ...i, outreach: { ...i.outreach, autoError: err } }));
-      note('error', `Email to ${inv.name} failed: ${err}`);
+      note('error', `${tagOf(inv)} Email to ${inv.name} failed: ${err}`);
       if (/daily|limit|quota/i.test(err)) break;
       continue;
     }
@@ -130,7 +163,7 @@ async function sendDue() {
     }));
     const a = loadState().automation!;
     a.sentLog = [...(a.sentLog || []), { at: new Date().toISOString(), investorId: inv.id, step: step + 1 }].slice(-3000);
-    note('success', `Sent email ${step + 1} to ${inv.name}${inv.firm ? ` (${inv.firm})` : ''}${next ? ` — next follow-up ${nextDate}` : ' — sequence complete'}`);
+    note('success', `${tagOf(inv)} Sent email ${step + 1} to ${inv.name}${inv.firm ? ` (${inv.firm})` : ''}${next ? ` — next follow-up ${nextDate}` : ' — sequence complete'}`);
     await new Promise(r => setTimeout(r, 4000)); // space out sends
   }
 }
@@ -145,7 +178,10 @@ async function checkInbox(force = false) {
   const watching = st.investors.filter(
     (i: Investor) => i.email && EMAIL_RE.test(i.email) && (i.outreach.sentStepsCount > 0 || i.outreach.status === 'contacted') && !CLOSED.includes(i.outreach.status)
   );
-  const res = await gmailCheck(watching.map((i: Investor) => i.email.toLowerCase()).slice(0, 400));
+  const list = watching.slice(0, 400);
+  const tags: Record<string, string> = {};
+  for (const i of list) tags[i.email.toLowerCase()] = AUDIENCE_TEXT[audienceOf(i)].label;
+  const res = await gmailCheck(list.map((i: Investor) => i.email.toLowerCase()), 60, tags);
   lastGmailRemaining = res.remaining;
 
   for (const r of res.replies) {
@@ -160,10 +196,10 @@ async function checkInbox(force = false) {
         status: 'replied',
         replyDate: r.date.slice(0, 10),
         nextFollowUpDate: '',
-        responseNotes: `${i.outreach.responseNotes ? i.outreach.responseNotes + '\n' : ''}Reply (${r.date.slice(0, 10)}): ${r.snippet}`.slice(0, 2000)
+        responseNotes: `${i.outreach.responseNotes ? i.outreach.responseNotes + '\n' : ''}${tagOf(i)} Reply (${r.date.slice(0, 10)}): ${r.snippet}`.slice(0, 2000)
       }
     }));
-    note('success', `${inv.name} replied — follow-ups stopped. Check your Gmail!`);
+    note('success', `${tagOf(inv)} ${inv.name} replied — follow-ups stopped. Check your Gmail (tagged "${AUDIENCE_TEXT[audienceOf(inv)].label}").`);
   }
 
   for (const acc of res.accepted) {
@@ -174,7 +210,7 @@ async function checkInbox(force = false) {
     );
     if (!inv) continue;
     updateInvestor(inv.id, i => ({ ...i, outreach: { ...i.outreach, linkedinAcceptedAt: acc.date } }));
-    note('success', `${inv.name} accepted your LinkedIn invitation — send them the message from the Outreach tab.`);
+    note('success', `${tagOf(inv)} ${inv.name} accepted your LinkedIn invitation — send them the message from the Outreach tab.`);
   }
 }
 

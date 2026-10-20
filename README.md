@@ -57,6 +57,10 @@ The build and start commands are already set in `railway.json` (`npm run build` 
 
 ## Using it
 
+**Who it looks for:** only people based in your business's country (from the location in *Your App*: "Chandler, AZ" → United States, with a bonus for Arizona). Anyone who wants money from you **before** anything happens (retainers, application, pitch or membership fees) is filtered out of your lists and never emailed. The list tab shows how many were hidden and lets you look at them. Fundraising experts paid only from results (success fee) are preferred.
+
+**Emails** follow the two model emails in `src/data/emailTemplates.ts`: the investor email and the fundraising-expert email (5% success fee, no upfront fees, up to 0.5% equity). To change the terms, edit `EXPERT_TERMS` in that file.
+
 **Investors or fundraising experts?** Use the **Looking for** dropdown at the top. *Investors* finds people and funds who could invest. *Fundraising experts* finds people who can help you raise (fundraising consultants and advisors, pitch-deck and financial-model experts, fractional CFOs, startup lawyers, boutique bankers). Each has its own list, scores and emails, and you can switch any time. Settings (auto-email, limits) apply to both lists.
 
 1. **Your App tab:** check the facts, add the raise amount, real traction and the founder's name, then click **Analyse with AI**.
@@ -88,6 +92,17 @@ Railway's free plan blocks normal email, so a tiny free script inside your own G
 9. LinkedIn: in LinkedIn → Settings → Notifications, keep **email** notifications on for "Invitation accepted", so the agent can see who accepted.
 
 If you change the script later, use **Deploy → Manage deployments → Edit → New version** so the URL stays the same.
+
+### Updating the Gmail script (needed for Google Sheets and the Investor / Expert tags)
+
+1. Open your project on **https://script.google.com**, select all the code and delete it, then paste the new `google-apps-script/Code.gs`.
+2. Put **your own** SECRET back on the `const SECRET = '…'` line (the same one as in Railway). Click **Save**.
+3. Pick **doGet** in the function list and click **▶ Run** → **Review permissions** → your account → **Advanced** → **Go to … (unsafe)** → **Allow**. Google asks again because the script can now create Google Sheets.
+4. **Deploy → Manage deployments → ✏ Edit → Version: New version → Deploy.** The URL stays the same, so nothing changes in Railway.
+
+What it adds:
+- **Open in Google Sheets** (Investors / Experts tab and Outreach tab) creates a Google Sheet of the list in your Google Drive and opens it. Use **File → Download** in Sheets if you need an Excel file.
+- Every email the agent sends gets a Gmail label, **Investor** or **Fundraising Expert**. Replies stay in the same thread, so they carry the label too, and the agent also labels any reply it finds.
 
 ### About LinkedIn
 

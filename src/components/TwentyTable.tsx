@@ -165,6 +165,15 @@ export const TwentyTable: React.FC<TwentyTableProps> = ({
                     >
                       <Mail className="w-3.5 h-3.5" />
                     </a>}
+                    {inv.phone && (
+                      <a
+                        href={`tel:${inv.phone.replace(/[^\d+]/g, '')}`}
+                        className="px-1.5 py-1 text-[10px] font-semibold text-sky-700 hover:bg-sky-100 rounded transition-colors"
+                        title={`Public phone: ${inv.phone}`}
+                      >
+                        ☎
+                      </a>
+                    )}
 
                     <button
                       onClick={() => onDeleteInvestor(inv.id)}

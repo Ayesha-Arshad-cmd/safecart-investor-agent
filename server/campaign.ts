@@ -28,6 +28,7 @@ import type { Campaign, CampaignCandidate, StartupProfile, AppSettings, Pipeline
 const PACE_MS = () => Number(process.env.AGENT_PACE_MS || 8000);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+const pct = (n: number, d: number) => `${d ? Math.round((n / d) * 100) : 0}%`;
 const norm = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 let worker: Promise<void> | null = null;
@@ -283,6 +284,8 @@ async function runWorker() {
     }
 
     // ---------------- 4. quick score — 10 per AI request
+    let upfrontSkips = 0;
+    let outsideSkips = 0;
     while (c.phase === 'quick' && alive()) {
       const added = c.candidates.filter(x => x.stage === 'quick').length;
       if (added >= c.target) {
@@ -306,8 +309,10 @@ async function runWorker() {
           }
           cand.quickScore = r.score;
           cand.quickReason = r.reason;
-          if (!r.isInvestor || r.score < minKeep) {
+          if (!r.isInvestor || r.score < minKeep || r.upfront || r.outside) {
             cand.stage = 'skipped';
+            if (r.upfront) upfrontSkips++;
+            if (r.outside) outsideSkips++;
             continue;
           }
           // don't duplicate someone already in the CRM
@@ -322,6 +327,11 @@ async function runWorker() {
           toAdd.push(inv);
         }
         if (toAdd.length) mergeInvestors(toAdd);
+        if (upfrontSkips || outsideSkips) {
+          log('score', `Filtered out ${[upfrontSkips ? `${upfrontSkips} asking for money upfront` : '', outsideSkips ? `${outsideSkips} outside the target country` : ''].filter(Boolean).join(' and ')}.`, 'info');
+          upfrontSkips = 0;
+          outsideSkips = 0;
+        }
         log('score', `Quick-scored ${todo.length}: ${toAdd.length} added to your list (${c.candidates.filter(x => x.stage === 'quick').length} total this run).`, 'success');
       } catch (e: any) {
         const msg = String(e?.message || e);
@@ -389,7 +399,15 @@ async function runWorker() {
             cand.investorId = inv.id;
             cand.stage = 'researched';
             cand.hasEmail = !!inv.email;
-            log('score', `Fit ${inv.fitScore.total}/100 (${inv.fitScore.status.toUpperCase()})${inv.email ? ` · email found` : ''}`, 'success', cand.name);
+            log(
+              'score',
+              inv.upfrontFee === 'yes'
+                ? `Asks for money upfront${inv.feeModel ? ` (${inv.feeModel})` : ''} — filtered out of your list`
+                : `Fit ${inv.fitScore.total}/100 (${inv.fitScore.status.toUpperCase()})${inv.email ? ' · email found' : ''}${inv.phone ? ' · phone found' : ''}`,
+              inv.upfrontFee === 'yes' ? 'warn' : 'success',
+              cand.name
+            );
+            (cand as any).hasPhone = !!inv.phone;
           } catch (e: any) {
             const msg = String(e?.message || e);
             if (/No AI key/i.test(msg)) throw e;
@@ -418,7 +436,7 @@ async function runWorker() {
         log('crm', `Finished — researched ${done.length}; ${done.filter(x => x.hasEmail).length} now have an email. The rest: use LinkedIn or their website's contact form.`, 'success');
       } else if (c.candidates.some(x => x.stage === 'researched')) {
         const done = c.candidates.filter(x => x.stage === 'researched');
-        log('crm', `Emails found for ${done.filter(x => x.hasEmail).length} of ${done.length} deep-researched ${T.many}. The rest: LinkedIn or their website's contact form.`, 'info');
+        log('crm', `Public contact info for ${done.length} deep-researched ${T.many}: email ${pct(done.filter(x => x.hasEmail).length, done.length)}, phone ${pct(done.filter(x => (x as any).hasPhone).length, done.length)}. The rest: LinkedIn or their website's contact form.`, 'info');
       }
       if (c.mode !== 'upgrade') log('crm', `Run finished — ${c.candidates.filter(x => x.stage === 'quick' || x.stage === 'researched').length} ${T.many} added (${c.candidates.filter(x => x.stage === 'researched').length} deeply researched). Start another run to find the next batch.`, 'success');
       save(c);

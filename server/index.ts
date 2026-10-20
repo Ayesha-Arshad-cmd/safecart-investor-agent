@@ -12,7 +12,8 @@ import { aiConfigured, aiProviderNames } from './ai';
 import { searchProviderNames, webSearch } from './search';
 import { emailProvider, sendEmail } from './email';
 import { loadState, saveState, storageInfo, flushNow, mergeInvestors, clearInvestors } from './store';
-import { audienceOf } from '../src/data/audience';
+import { audienceOf, AUDIENCE_TEXT } from '../src/data/audience';
+import { gmailConfigured, gmailSheet } from './gmail';
 import { startCampaign, startUpgrade, getCampaign, pauseCampaign, resumeCampaign, resumeOnBoot } from './campaign';
 import { startAutomation, runAutomationNow, automationStatus } from './automation';
 import {
@@ -29,7 +30,7 @@ import {
   defaultQueries
 } from './agent';
 import { investorToCandidate } from './agent';
-import type { HealthInfo } from '../src/types';
+import type { HealthInfo, Investor } from '../src/types';
 
 const PORT = Number(process.env.PORT) || 8080;
 const DIST = path.resolve(process.env.STATIC_DIR || path.join(process.cwd(), 'dist'));
@@ -219,7 +220,31 @@ route('POST', '/api/search/raw', async body => {
 
 route('POST', '/api/email/send', async body => {
   need(body.to && body.subject && body.body, 'to, subject and body required');
-  return await sendEmail(String(body.to), String(body.subject), String(body.body), body.replyTo, body.fromName);
+  return await sendEmail(String(body.to), String(body.subject), String(body.body), body.replyTo, body.fromName, body.label);
+});
+
+// ---- "Open in Google Sheets": the current list as a new Google Sheet in your Drive (via the Gmail helper)
+route('POST', '/api/sheet', async body => {
+  if (!gmailConfigured()) throw Object.assign(new Error('Google Sheets needs the Gmail helper script (see README → Automatic email).'), { status: 400 });
+  const st = loadState();
+  const aud = audienceOf(body);
+  const T = AUDIENCE_TEXT[aud];
+  const list = st.investors.filter((i: Investor) => audienceOf(i) === aud && (body.includeHidden || i.upfrontFee !== 'yes'));
+  const headers = [
+    'Type', 'Name', 'Title', T.One === 'Expert' ? 'Company' : 'Firm', 'Email', 'Phone', 'LinkedIn', 'Website', 'Location', 'Country',
+    'Fit score', 'Fit', 'Status', 'How they charge', 'Asks for money upfront?', T.field.stage, T.field.check, 'Industries', T.field.portfolio,
+    'Research', 'Last contacted', 'Next follow-up', 'Replied on', 'Reply / notes', 'Why they fit', 'Sources'
+  ];
+  const rows = list.map((i: Investor) => [
+    T.label, i.name, i.title, i.firm, i.email, i.phone || '', i.linkedin, i.website, i.location, i.country || '',
+    i.fitScore?.total ?? '', i.fitScore?.status || '', i.outreach?.status || '', i.feeModel || '', i.upfrontFee || 'unknown',
+    i.stage, i.checkSizeFormatted, (i.industries || []).join(', '), (i.portfolio || []).join(', '),
+    i.researchDepth === 'quick' ? 'Quick scan' : 'Deep', i.outreach?.lastContactedDate || '', i.outreach?.nextFollowUpDate || '',
+    i.outreach?.replyDate || '', i.outreach?.responseNotes || '', (i.fitScore?.whyInvest || []).join(' | '), (i.sourceUrls || []).join(' ')
+  ]);
+  const date = new Date().toISOString().slice(0, 10);
+  const r = await gmailSheet(`${st.startup?.name || 'Startup'} — ${T.menu} — ${date}`, T.menu, headers, rows);
+  return { url: r.url, rows: r.rows };
 });
 
 route('POST', '/api/agent/run', body => {
