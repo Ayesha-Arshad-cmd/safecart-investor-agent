@@ -24,7 +24,7 @@
  * Limits (set by Google): about 100 emails/day on a normal Gmail, 1,500/day on Google Workspace.
  */
 
-const SECRET = 'CHANGE-ME-to-a-long-random-password';
+const SECRET = 'creation.agent';
 
 function doGet() {
   return json_({ ok: true, service: 'SafeCart Kids Gmail helper', remaining: MailApp.getRemainingDailyQuota() });
