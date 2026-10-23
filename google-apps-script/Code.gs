@@ -8,6 +8,8 @@
  *   • tags every investor / expert email thread with a Gmail label ("Investor" or "Fundraising Expert"),
  *     so you can tell them apart in your inbox — replies stay in the same tagged thread
  *   • creates a Google Sheet of your list in your Google Drive ("Open in Google Sheets" button)
+ *   • keeps a backup of the agent's data (your lists) in Google Drive, folder "SafeCart Agent Data",
+ *     so hosts that wipe their disk on restart (like Render's free plan) never lose your lists
  *
  * Setup (5 minutes) — see README "Automatic email (Gmail script)":
  *   1. Go to https://script.google.com → New project → paste this whole file.
@@ -15,8 +17,8 @@
  *   3. Deploy → New deployment → type "Web app" → Execute as: Me → Who has access: Anyone → Deploy.
  *   4. Allow the Gmail permissions, copy the Web app URL into Railway as GMAIL_SCRIPT_URL.
  *
- * UPDATING an older copy: paste this whole file again, Save, run "doGet" once (▶ Run) and click Allow
- * (Google asks again because the script can now make Sheets), then Deploy → Manage deployments →
+ * UPDATING an older copy: paste this whole file again, put your SECRET back, Save, run "doGet" once (▶ Run)
+ * and click Allow (Google asks again whenever the script gets a new ability), then Deploy → Manage deployments →
  * ✏ Edit → Version: New version → Deploy. The web app URL stays the same.
  *
  * Limits (set by Google): about 100 emails/day on a normal Gmail, 1,500/day on Google Workspace.
@@ -35,8 +37,10 @@ function doPost(e) {
     if (req.secret !== SECRET) return json_({ ok: false, error: 'Wrong secret' });
     if (req.action === 'send') return json_(send_(req));
     if (req.action === 'check') return json_(check_(req));
-    if (req.action === 'quota') return json_({ ok: true, remaining: MailApp.getRemainingDailyQuota(), version: 2 });
+    if (req.action === 'quota') return json_({ ok: true, remaining: MailApp.getRemainingDailyQuota(), version: 3 });
     if (req.action === 'sheet') return json_(sheet_(req));
+    if (req.action === 'saveData') return json_(saveData_(req));
+    if (req.action === 'loadData') return json_(loadData_(req));
     return json_({ ok: false, error: 'Unknown action' });
   } catch (err) {
     return json_({ ok: false, error: String(err) });
@@ -125,4 +129,44 @@ function sheet_(req) {
   sh.setFrozenRows(1);
   sh.autoResizeColumns(1, Math.min(headers.length, 8));
   return { ok: true, url: ss.getUrl(), id: ss.getId(), rows: rows.length };
+}
+
+// ---------------------------------------------------------------- data backup (Google Drive)
+function dataFolder_() {
+  const it = DriveApp.getFoldersByName('SafeCart Agent Data');
+  return it.hasNext() ? it.next() : DriveApp.createFolder('SafeCart Agent Data');
+}
+
+function safeName_(name) {
+  return String(name || 'crm.json').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60);
+}
+
+/** Saves the agent's data file; also keeps one copy per day for the last 7 days. */
+function saveData_(req) {
+  if (typeof req.content !== 'string' || !req.content) return { ok: false, error: 'Nothing to save' };
+  const folder = dataFolder_();
+  const name = safeName_(req.name);
+  const it = folder.getFilesByName(name);
+  if (it.hasNext()) it.next().setContent(req.content);
+  else folder.createFile(name, req.content, 'application/json');
+
+  const day = Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd');
+  const daily = name.replace(/\.json$/, '') + '-' + day + '.json';
+  const d = folder.getFilesByName(daily);
+  if (d.hasNext()) d.next().setContent(req.content);
+  else folder.createFile(daily, req.content, 'application/json');
+  // remove daily copies older than 7 days
+  const files = folder.getFiles();
+  const cutoff = Date.now() - 8 * 86400000;
+  while (files.hasNext()) {
+    const f = files.next();
+    if (/-\d{4}-\d{2}-\d{2}\.json$/.test(f.getName()) && f.getDateCreated().getTime() < cutoff) f.setTrashed(true);
+  }
+  return { ok: true, bytes: req.content.length };
+}
+
+function loadData_(req) {
+  const it = dataFolder_().getFilesByName(safeName_(req.name));
+  if (!it.hasNext()) return { ok: true, exists: false };
+  return { ok: true, exists: true, content: it.next().getBlob().getDataAsString() };
 }

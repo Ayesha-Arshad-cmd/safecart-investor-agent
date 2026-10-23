@@ -8,6 +8,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { gmailConfigured, driveSave, driveLoad } from './gmail';
 
 export interface StoredState {
   startup: any | null;
@@ -36,11 +37,127 @@ const FILE = path.join(DATA_DIR, 'crm.json');
 let cache: StoredState | null = null;
 let writeTimer: NodeJS.Timeout | null = null;
 
+// ---------------------------------------------------------------- Google Drive backup
+// Hosts like Render's free plan wipe the disk on every restart. With the backup on, the data file is
+// copied to your Google Drive (folder "SafeCart Agent Data", via the Gmail helper script) a minute after
+// changes and on shutdown, and copied back when the server starts with an empty disk.
+// On automatically on Render; anywhere else set DRIVE_BACKUP=1.
+const BACKUP_NAME = 'crm.json';
+const BACKUP_EVERY_MS = () => Number(process.env.DRIVE_BACKUP_EVERY_MS || 60_000);
+let backupTimer: NodeJS.Timeout | null = null;
+let backupBlocked = false; // true while we could not read the existing backup — never overwrite it with less data
+let lastBackupAt = '';
+let lastBackupError = '';
+
+export function backupEnabled(): boolean {
+  const want = process.env.DRIVE_BACKUP ? /^(1|true|yes|on)$/i.test(process.env.DRIVE_BACKUP) : Boolean(process.env.RENDER);
+  return want && gmailConfigured();
+}
+
 export function storageInfo() {
+  const drive = backupEnabled();
   return {
-    path: FILE,
-    persistent: Boolean(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH) || !process.env.RAILWAY_ENVIRONMENT
+    path: drive
+      ? `Google Drive backup (folder "SafeCart Agent Data")${lastBackupAt ? ` · last saved ${lastBackupAt.slice(11, 16)} UTC` : ''}${backupBlocked ? ' · WAITING to read the backup' : ''}${lastBackupError ? ` · last error: ${lastBackupError.slice(0, 80)}` : ''}`
+      : FILE,
+    persistent: drive
+      ? !backupBlocked
+      : Boolean(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH) || !(process.env.RAILWAY_ENVIRONMENT || process.env.RENDER)
   };
+}
+
+function hasData(st: StoredState | null) {
+  return !!st && (st.investors?.length > 0 || !!st.startup || !!st.settings);
+}
+
+/** Merge a backup into what is in memory (used if the backup could only be read after the app started). */
+function mergeBackup(b: StoredState) {
+  const st = loadState();
+  for (const k of ['startup', 'settings', 'campaign', 'automation'] as const) if (!(st as any)[k] || (k === 'automation' && !Object.keys(st.automation || {}).length)) (st as any)[k] = (b as any)[k];
+  st.usedQueries = [...new Set([...(b.usedQueries || []), ...(st.usedQueries || [])])].slice(-3000);
+  st.deletedIds = [...new Set([...(b.deletedIds || []), ...(st.deletedIds || [])])].slice(-5000);
+  mergeInvestors(b.investors || []);
+}
+
+async function readBackup(): Promise<'restored' | 'none' | 'kept-local'> {
+  const r = await driveLoad(BACKUP_NAME);
+  if (!r.exists || !r.content) return 'none';
+  const b = JSON.parse(r.content) as StoredState;
+  if (!Array.isArray(b.investors)) b.investors = [];
+  const local = loadState();
+  if (!hasData(local)) {
+    cache = b;
+    loadState(); // fill defaults
+    flush();
+    return 'restored';
+  }
+  // the disk survived (or the app already started): keep both, newest wins per investor
+  mergeBackup(b);
+  return 'kept-local';
+}
+
+/** Call once before the server starts. Copies the Drive backup back if the disk is empty. */
+export async function restoreFromBackup(): Promise<void> {
+  if (!backupEnabled()) return;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const r = await readBackup();
+      console.log(`[store] Google Drive backup: ${r === 'restored' ? `restored ${loadState().investors.length} contacts` : r === 'none' ? 'none yet — a new one will be made' : 'merged with the data on disk'}`);
+      backupBlocked = false;
+      return;
+    } catch (e: any) {
+      lastBackupError = String(e?.message || e);
+      console.error(`[store] could not read the Google Drive backup (try ${attempt}/3): ${lastBackupError}`);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 5000));
+    }
+  }
+  // keep going, but never overwrite a backup we could not read; retry in the background
+  backupBlocked = true;
+  const retry = setInterval(async () => {
+    try {
+      await readBackup();
+      backupBlocked = false;
+      lastBackupError = '';
+      clearInterval(retry);
+      console.log('[store] Google Drive backup read — backups are on again.');
+      scheduleBackup();
+    } catch (e: any) {
+      lastBackupError = String(e?.message || e);
+    }
+  }, 120_000);
+  retry.unref();
+}
+
+async function backupNow(): Promise<void> {
+  if (!backupEnabled() || backupBlocked || !cache) return;
+  if (backupTimer) {
+    clearTimeout(backupTimer);
+    backupTimer = null;
+  }
+  try {
+    await driveSave(BACKUP_NAME, JSON.stringify(cache));
+    lastBackupAt = new Date().toISOString();
+    lastBackupError = '';
+  } catch (e: any) {
+    lastBackupError = String(e?.message || e);
+    console.error('[store] Google Drive backup failed:', lastBackupError);
+    scheduleBackup(); // try again later
+  }
+}
+
+function scheduleBackup() {
+  if (!backupEnabled() || backupBlocked || backupTimer) return;
+  backupTimer = setTimeout(() => {
+    backupTimer = null;
+    void backupNow();
+  }, BACKUP_EVERY_MS());
+  backupTimer.unref?.();
+}
+
+/** On shutdown: write the file and send a last backup (Render gives the app a few seconds). */
+export async function shutdownSave(): Promise<void> {
+  flushNow();
+  if (backupEnabled() && (backupTimer || !lastBackupAt)) await Promise.race([backupNow(), new Promise(r => setTimeout(r, 8000))]);
 }
 
 export function loadState(): StoredState {
@@ -66,6 +183,7 @@ function flush() {
   } catch (e: any) {
     console.error('[store] write failed:', e?.message);
   }
+  scheduleBackup();
 }
 
 function scheduleFlush() {

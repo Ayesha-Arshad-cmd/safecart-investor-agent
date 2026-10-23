@@ -55,6 +55,17 @@ The build and start commands are already set in `railway.json` (`npm run build` 
 
 ---
 
+## Deploy on Render (free) instead of Railway
+
+Render's free plan wipes the server's disk on every restart, so the agent keeps your data in **your Google Drive** (folder *SafeCart Agent Data*) through the Gmail helper script. It saves about a minute after each change and on shutdown, then copies the data back when the server starts. This switches on by itself on Render, or anywhere you set `DRIVE_BACKUP=1`.
+
+- **New → Web Service** → connect GitHub → pick this repo → Language **Node**, Branch **main**
+- Build Command: `npm install && npm run build` · Start Command: `npm start` · Instance type: **Free**
+- Environment: the same keys as on Railway **except DATA_DIR**, plus `DRIVE_BACKUP=1`
+- Advanced → Health Check Path: `/api/health`
+- The free plan sleeps after 15 minutes without visits. Use a free pinger (cron-job.org) to open `https://<your-app>.onrender.com/api/health` every 10 minutes so auto-email keeps running. One app running all month fits in Render's 750 free hours.
+- Don't run Railway and Render at the same time: both would send emails and both would write the same Drive backup.
+
 ## Using it
 
 **Who it looks for:** only people based in your business's country (from the location in *Your App*: "Chandler, AZ" → United States, with a bonus for Arizona). Anyone who wants money from you **before** anything happens (retainers, application, pitch or membership fees) is filtered out of your lists and never emailed. The list tab shows how many were hidden and lets you look at them. Fundraising experts paid only from results (success fee) are preferred.

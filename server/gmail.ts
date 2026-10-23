@@ -78,3 +78,23 @@ export async function gmailSheet(title: string, tab: string, headers: string[], 
     throw e;
   }
 }
+
+/** Save / load the agent's data file in Google Drive (folder "SafeCart Agent Data"). */
+export async function driveSave(name: string, content: string): Promise<void> {
+  try {
+    await call({ action: 'saveData', name, content }, 120000);
+  } catch (e: any) {
+    if (/Unknown action/i.test(String(e?.message))) throw new Error('Gmail helper script is an old version — paste the new Code.gs and deploy a new version.');
+    throw e;
+  }
+}
+
+export async function driveLoad(name: string): Promise<{ exists: boolean; content?: string }> {
+  try {
+    const r = await call({ action: 'loadData', name }, 120000);
+    return { exists: !!r.exists, content: r.content };
+  } catch (e: any) {
+    if (/Unknown action/i.test(String(e?.message))) throw new Error('Gmail helper script is an old version — paste the new Code.gs and deploy a new version.');
+    throw e;
+  }
+}

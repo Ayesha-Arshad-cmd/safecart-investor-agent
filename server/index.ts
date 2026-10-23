@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import { aiConfigured, aiProviderNames } from './ai';
 import { searchProviderNames, webSearch } from './search';
 import { emailProvider, sendEmail } from './email';
-import { loadState, saveState, storageInfo, flushNow, mergeInvestors, clearInvestors } from './store';
+import { loadState, saveState, storageInfo, flushNow, mergeInvestors, clearInvestors, restoreFromBackup, shutdownSave } from './store';
 import { audienceOf, AUDIENCE_TEXT } from '../src/data/audience';
 import { gmailConfigured, gmailSheet } from './gmail';
 import { startCampaign, startUpgrade, getCampaign, pauseCampaign, resumeCampaign, resumeOnBoot } from './campaign';
@@ -298,6 +298,8 @@ const server = http.createServer(async (req, res) => {
 
 server.requestTimeout = 0; // research calls can take a while
 server.headersTimeout = 65000;
+// Render's free plan starts with an empty disk: bring the data back from Google Drive first
+await restoreFromBackup();
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`SafeCart Kids Investor Agent on :${PORT}`);
   startAutomation();
@@ -310,9 +312,10 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {
-  process.on(sig, () => {
-    flushNow();
+  process.on(sig, async () => {
+    setTimeout(() => process.exit(0), 12000).unref();
+    await shutdownSave().catch(() => flushNow());
     server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 3000).unref();
+    setTimeout(() => process.exit(0), 1500).unref();
   });
 }
