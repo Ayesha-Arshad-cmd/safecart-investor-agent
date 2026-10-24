@@ -10,9 +10,11 @@
  */
 import { loadState, saveState, updateInvestor } from './store';
 import { emailProvider, sendEmail } from './email';
-import { gmailConfigured, gmailCheck, gmailQuota } from './gmail';
+import { gmailConfigured, gmailCheck, gmailQuota, isSetupError } from './gmail';
 import type { AutomationStatus, Investor } from '../src/types';
 import { audienceOf, AUDIENCE_TEXT } from '../src/data/audience';
+import { targetGeo } from '../src/data/geo';
+import { excludedReason } from '../src/data/filters';
 import { TEMPLATE_V } from '../src/data/emailTemplates';
 import { generateOutreach } from './agent';
 
@@ -46,9 +48,13 @@ function settingsOf(st: any) {
     emailHoldMinutes: Math.max(0, Number(s.emailHoldMinutes ?? 60)),
     companyAddress: String(s.companyAddress || '').trim(),
     senderName: String(s.senderName || '').trim(),
-    senderEmail: String(s.senderEmail || '').trim()
+    senderEmail: String(s.senderEmail || '').trim(),
+    geo: targetGeo(st.startup?.location)
   };
 }
+
+/** Never emailed: law firms & other non-experts, people outside the target country (USA), people who want money upfront. */
+export const excludedFromOutreach = excludedReason;
 
 function note(level: 'info' | 'success' | 'warn' | 'error', message: string) {
   const a = loadState().automation!;
@@ -65,6 +71,7 @@ export function dueStep(inv: Investor, cfg: ReturnType<typeof settingsOf>, now =
   const o = inv.outreach;
   if (!inv.email || !EMAIL_RE.test(inv.email)) return -1;
   if (o.autoPaused || CLOSED.includes(o.status)) return -1;
+  if (excludedFromOutreach(inv, cfg.geo)) return -1;
   if (inv.researchDepth === 'quick') return -1; // quick-scanned only: no researched email yet
   if (!o.sequences?.length) return -1;
   if ((inv.fitScore?.total ?? 0) < cfg.autoEmailMinScore) return -1;
@@ -78,9 +85,9 @@ export function dueStep(inv: Investor, cfg: ReturnType<typeof settingsOf>, now =
   return o.nextFollowUpDate && o.nextFollowUpDate <= todayUtc() ? idx : -1;
 }
 
-function withFooter(body: string, startupName: string, cfg: ReturnType<typeof settingsOf>, founderName: string) {
-  const sign = cfg.senderName || founderName || '';
-  const lines = ['', '--', [sign, startupName].filter(Boolean).join(' · ')];
+function withFooter(body: string, _startupName: string, cfg: ReturnType<typeof settingsOf>, _founderName: string) {
+  // the email already ends with the founder's signature — only the address + opt-out line US law asks for
+  const lines = ['', '--'];
   if (cfg.companyAddress) lines.push(cfg.companyAddress);
   lines.push('If you would rather not hear from me again, just reply "no thanks".');
   return `${body.trimEnd()}\n${lines.join('\n')}`;
@@ -110,8 +117,8 @@ async function sendDue() {
   for (const { inv: found, step } of due) {
     if (budget <= 0) break;
     let inv = found;
-    // first email written with an older template? rewrite it with the current model email before sending
-    if (step === 0 && (inv.outreach.templateV || 1) < TEMPLATE_V) {
+    // written with an older template? rebuild the emails not sent yet from the current template before sending
+    if ((inv.outreach.templateV || 1) < TEMPLATE_V) {
       try {
         const o = await generateOutreach(st.startup, inv, st.settings);
         if (o.sequences.length) {
@@ -119,10 +126,16 @@ async function sendDue() {
             ...i,
             linkedinNote: o.linkedinNote || i.linkedinNote,
             linkedinMessage: o.linkedinMessage || i.linkedinMessage,
-            outreach: { ...i.outreach, sequences: o.sequences, sequenceGenerated: true, templateV: o.templateV }
+            outreach: {
+              ...i.outreach,
+              // keep emails already sent exactly as they were; replace the rest
+              sequences: o.sequences.map((ns, k) => (i.outreach.sequences[k]?.sentAt ? i.outreach.sequences[k] : ns)),
+              sequenceGenerated: true,
+              templateV: o.templateV
+            }
           }));
           inv = loadState().investors.find((x: Investor) => x.id === inv.id) || inv;
-          note('info', `${tagOf(inv)} Rewrote the emails for ${inv.name} with the new template before sending.`);
+          note('info', `${tagOf(inv)} Rebuilt the emails for ${inv.name} from the new template before sending.`);
         }
       } catch (e: any) {
         note('warn', `${tagOf(inv)} Could not rewrite the emails for ${inv.name} yet (${String(e?.message || e).slice(0, 80)}) — will try again later.`);
@@ -143,6 +156,11 @@ async function sendDue() {
       updateInvestor(inv.id, i => ({ ...i, outreach: { ...i.outreach, autoError: err } }));
       note('error', `${tagOf(inv)} Email to ${inv.name} failed: ${err}`);
       if (/daily|limit|quota/i.test(err)) break;
+      // a set-up problem (wrong password, old script…) fails every email the same way — stop and say it once
+      if (isSetupError(err)) {
+        note('error', `Stopped sending until this is fixed: ${err}`);
+        break;
+      }
       continue;
     }
     budget--;
@@ -225,11 +243,15 @@ async function doTick(forceCheck: boolean) {
   running = true;
   const a = loadState().automation!;
   try {
+    let setupProblem = '';
     await checkInbox(forceCheck).catch(e => {
       a.lastError = String(e?.message || e);
-      note('warn', `Inbox check failed: ${a.lastError}`);
+      if (isSetupError(a.lastError)) setupProblem = a.lastError;
+      else note('warn', `Inbox check failed: ${a.lastError}`);
     });
-    await sendDue();
+    // wrong password / old script: every email would fail the same way — say it once, send nothing
+    if (setupProblem) note('error', `Paused sending and reply checks until this is fixed: ${setupProblem}`);
+    else await sendDue();
     a.lastRunAt = new Date().toISOString();
     if (!forceCheck) a.lastError = a.lastError && /Inbox check failed/.test(a.lastError) ? a.lastError : undefined;
   } catch (e: any) {
@@ -247,7 +269,7 @@ export function startAutomation() {
 }
 
 export async function runAutomationNow() {
-  await tick(true); // if a check was already running, wait for it, then run a fresh one
+  if (running) await current; // a check was already running: let it finish, then run a fresh one
   await tick(true);
   return automationStatus();
 }

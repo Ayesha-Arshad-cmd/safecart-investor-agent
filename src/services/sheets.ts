@@ -2,11 +2,11 @@ import { api } from './api';
 import type { Audience } from '../types';
 
 /**
- * "Open in Google Sheets": the server asks your Gmail helper script to create a Google Sheet in your Drive,
- * then the sheet opens in a new tab (from there: File → Download if you want a file).
- * If the helper isn't set up / updated yet, falls back to downloading a CSV that Google Sheets can import.
+ * "Open in Google Sheets": the server asks your Gmail helper script to create a Google Sheet in your Google Drive,
+ * and the sheet opens in a new tab. No CSV / Excel file is ever downloaded.
+ * If it can't be made, you get a message saying exactly what to fix.
  */
-export async function openInGoogleSheets(audience: Audience, fallbackCsv: () => void, toast: (msg: string, error?: boolean) => void) {
+export async function openInGoogleSheets(audience: Audience, toast: (msg: string, error?: boolean) => void) {
   // open the tab right away (browsers block pop-ups opened after waiting)
   const tab = window.open('', '_blank');
   if (tab) tab.document.write('<p style="font-family:sans-serif;padding:24px">Creating your Google Sheet…</p>');
@@ -14,10 +14,13 @@ export async function openInGoogleSheets(audience: Audience, fallbackCsv: () => 
     const r = await api.sheet(audience);
     if (tab) tab.location.href = r.url;
     else window.open(r.url, '_blank');
-    toast(`Google Sheet created with ${r.rows} rows — it's also saved in your Google Drive.`);
+    toast(
+      (r.tabs || 1) > 1
+        ? `Google Sheet created with 3 tabs — Investors, Fundraising Experts, and All together — with every detail. Also saved in your Google Drive.`
+        : `Google Sheet created with ${r.rows} rows — update your Gmail helper script to get both tabs with every detail.`
+    );
   } catch (e: any) {
     tab?.close();
-    fallbackCsv();
-    toast(`${e?.message || 'Could not create the Google Sheet'} Downloaded a CSV instead (open it with Google Sheets → File → Import).`, true);
+    toast(`Couldn't create the Google Sheet: ${e?.message || 'unknown error'}`, true);
   }
 }

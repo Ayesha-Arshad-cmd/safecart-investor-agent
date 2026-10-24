@@ -66,6 +66,23 @@ Render's free plan wipes the server's disk on every restart, so the agent keeps 
 - The free plan sleeps after 15 minutes without visits. Use a free pinger (cron-job.org) to open `https://<your-app>.onrender.com/api/health` every 10 minutes so auto-email keeps running. One app running all month fits in Render's 750 free hours.
 - Don't run Railway and Render at the same time: both would send emails and both would write the same Drive backup.
 
+## Calendar booking page (for the link in investor emails)
+
+1. Sign in to Google Calendar as **safecartkidsai@gmail.com** → **Create** → **Appointment schedule**.
+2. Title "15-minute call with SafeCartKids", duration 15 minutes, set your available hours → **Next** → **Save**.
+3. Click the schedule in your calendar → **Share** (or **Open booking page**) → copy the link (`https://calendar.app.google/…`).
+4. In the app: **Settings → Calendar booking link** → paste → **Save**.
+Free Gmail accounts get one booking page, which is enough. Don't use `calendar.google.com/calendar/u/0/r`: that is your own calendar, and other people can't book with it.
+
+## The emails
+
+They are your own text, word for word (`src/data/emailTemplates.ts`). For each person the agent only adds the greeting ("Hi Lars,"), ONE sentence about them from the research (left out if nothing specific was found), and your booking link. Unsent emails written before a template change are rebuilt automatically before they go out.
+
+## Checking the Gmail script
+
+- **Settings → Test Gmail helper connection** should say *Connected — password correct, script up to date (v4)*.
+- Opening your `GMAIL_SCRIPT_URL` in a browser shows `version` and `passwordLength` of the **live** script. If the version is missing or below 4, that link is running an old copy: in the script, **Deploy → Manage deployments → ✏ Edit → Version: New version → Deploy**, and make sure `GMAIL_SCRIPT_URL` is that deployment's Web app URL.
+
 ## Using it
 
 **Who it looks for:** only people based in your business's country (from the location in *Your App*: "Chandler, AZ" → United States, with a bonus for Arizona). Anyone who wants money from you **before** anything happens (retainers, application, pitch or membership fees) is filtered out of your lists and never emailed. The list tab shows how many were hidden and lets you look at them. Fundraising experts paid only from results (success fee) are preferred.

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Settings, Check, RefreshCw, Cpu, Search, Mail, Database, CheckCircle2, AlertCircle } from 'lucide-react';
 import { AppSettings, HealthInfo } from '../types';
+import { api } from '../services/api';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ const Row = ({ ok, icon, title, detail, hint }: { ok: boolean; icon: React.React
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, settings, health, onSaveSettings, onClearCrm, onRefreshHealth }) => {
   const [form, setForm] = useState<AppSettings>({ ...settings });
+  const [test, setTest] = useState<{ busy?: boolean; ok?: boolean; message?: string }>({});
   useEffect(() => setForm({ ...settings }), [settings, isOpen]);
   if (!isOpen) return null;
 
@@ -93,6 +95,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, s
                 }
                 hint={health.email.provider === 'gmail' ? undefined : 'For automatic emails, set up the free Gmail helper script (see README).'}
               />
+              {health.email.provider === 'gmail' && (
+                <div className="-mt-1 flex flex-wrap items-center gap-2 text-xs px-3">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setTest({ busy: true });
+                      try {
+                        const r = await api.gmailTest();
+                        setTest({ ok: r.ok, message: r.message });
+                      } catch (e: any) {
+                        setTest({ ok: false, message: e?.message || 'Test failed' });
+                      }
+                    }}
+                    disabled={test.busy}
+                    className="px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 font-medium cursor-pointer disabled:opacity-60"
+                  >
+                    {test.busy ? 'Testing…' : 'Test Gmail helper connection'}
+                  </button>
+                  {test.message && <span className={test.ok ? 'text-emerald-700' : 'text-red-700'}>{test.ok ? '✓ ' : '✗ '}{test.message}</span>}
+                </div>
+              )}
               <Row
                 ok={health.storage.persistent}
                 icon={<Database className="w-4 h-4 text-emerald-600" />}
@@ -251,6 +274,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, s
                 placeholder="SafeCart Kids, street, Chandler, AZ 85286, USA"
                 onChange={e => setForm({ ...form, companyAddress: e.target.value })}
               />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-slate-500 mb-1">Calendar booking link (Google Calendar booking page of safecartkidsai@gmail.com — goes in investor emails)</label>
+              <input
+                className={field}
+                value={form.bookingLink || ''}
+                placeholder="https://calendar.app.google/…"
+                onChange={e => setForm({ ...form, bookingLink: e.target.value.trim() })}
+              />
+              {form.bookingLink && !/^https?:\/\/\S+$/.test(form.bookingLink) && (
+                <div className="text-xs text-red-700 mt-1">This doesn't look like a link — it must start with https://</div>
+              )}
+              {form.bookingLink && /calendar\.google\.com\/calendar\/u\/\d\/r/.test(form.bookingLink) && (
+                <div className="text-xs text-red-700 mt-1">That's your own calendar page — investors can't book with it. Use the booking page link (see README → "Calendar booking page").</div>
+              )}
+              {!form.bookingLink && <div className="text-xs text-slate-500 mt-1">Empty = emails say "just reply to this email with a time that works best for you".</div>}
             </div>
           </div>
           {form.autoEmailEnabled && health?.email.provider !== 'gmail' && (

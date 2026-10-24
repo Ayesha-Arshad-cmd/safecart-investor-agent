@@ -7,6 +7,21 @@
  *   GMAIL_SCRIPT_SECRET  the same SECRET you typed into the script
  */
 const env = (k: string) => (process.env[k] || '').trim();
+/** the password, without quotes someone may have typed around it in Railway / Render */
+const secret = () => env('GMAIL_SCRIPT_SECRET').replace(/^['"]+|['"]+$/g, '').trim();
+
+/** Problems with the set-up (not with one email): retrying other emails is pointless until it's fixed. */
+export function isSetupError(msg: string): boolean {
+  return /wrong secret|set secret|old version|unknown action|web page instead|not set up|not reachable|authoriz|permission/i.test(msg);
+}
+
+/** Turns the script's short errors into plain instructions. */
+function explain(msg: string): string {
+  if (/Wrong secret/i.test(msg))
+    return 'Gmail helper: Wrong secret — GMAIL_SCRIPT_SECRET on your server is not exactly the same as the SECRET line in your Google script. Copy the same password into both (no spaces, no quotes), then Deploy → Manage deployments → Edit → New version in the script.';
+  if (/Set SECRET/i.test(msg)) return 'Gmail helper: the script still has CHANGE-ME on its SECRET line — put your password there, Save, and deploy a New version.';
+  return msg;
+}
 
 export function gmailConfigured(): boolean {
   return /^https:\/\/script\.google\.com\/.+\/exec$/.test(env('GMAIL_SCRIPT_URL')) && !!env('GMAIL_SCRIPT_SECRET');
@@ -17,7 +32,7 @@ async function call(payload: Record<string, unknown>, timeoutMs = 60000): Promis
   const res = await fetch(env('GMAIL_SCRIPT_URL'), {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ ...payload, secret: env('GMAIL_SCRIPT_SECRET') }),
+    body: JSON.stringify({ ...payload, secret: secret() }),
     redirect: 'follow',
     signal: AbortSignal.timeout(timeoutMs)
   });
@@ -32,7 +47,7 @@ async function call(payload: Record<string, unknown>, timeoutMs = 60000): Promis
         : `Gmail helper error ${res.status}`
     );
   }
-  if (!data.ok) throw new Error(`Gmail helper: ${data.error || 'failed'}`);
+  if (!data.ok) throw new Error(explain(`Gmail helper: ${data.error || 'failed'}`));
   return data;
 }
 
@@ -68,14 +83,46 @@ export async function gmailQuota(): Promise<number | undefined> {
 }
 
 /** Creates a Google Sheet in the founder's Drive (needs the updated helper script). */
-export async function gmailSheet(title: string, tab: string, headers: string[], rows: (string | number)[][]): Promise<{ url: string; rows: number }> {
+export interface SheetTab {
+  name: string;
+  headers: string[];
+  rows: (string | number)[][];
+}
+
+/** Creates ONE Google Sheet in the founder's Drive with a tab per list; returns its link. */
+export async function gmailSheet(title: string, tabs: SheetTab[]): Promise<{ url: string; rows: number; tabs: number }> {
   try {
-    const r = await call({ action: 'sheet', title, tab, headers, rows }, 120000);
-    return { url: r.url, rows: r.rows };
+    // headers/rows of the first tab are also sent so an older script still makes a (one-tab) sheet
+    const r = await call({ action: 'sheet', title, tabs, tab: tabs[0]?.name, headers: tabs[0]?.headers, rows: tabs[0]?.rows }, 180000);
+    return { url: r.url, rows: r.rows, tabs: r.tabs || 1 };
   } catch (e: any) {
     const msg = String(e?.message || e);
-    if (/Unknown action/i.test(msg)) throw new Error('Your Gmail helper script is the old version — paste the new google-apps-script/Code.gs and deploy a new version (see README).');
-    throw e;
+    if (/Unknown action/i.test(msg))
+      throw new Error('your Gmail helper script is an old version. Paste the new google-apps-script/Code.gs on script.google.com, put your SECRET back, Save, then Deploy → Manage deployments → Edit → New version → Deploy.');
+    if (/permission|authoriz|scopes|SpreadsheetApp|not have access/i.test(msg))
+      throw new Error('the Gmail helper script needs permission to create Google Sheets. On script.google.com choose doGet → ▶ Run → Allow, then Deploy → Manage deployments → Edit → New version → Deploy.');
+    if (/web page instead of data/i.test(msg)) throw new Error('the Gmail helper is not reachable — in its deployment, "Who has access" must be "Anyone".');
+    throw new Error(msg.replace(/^Gmail helper:\s*/, ''));
+  }
+}
+
+/** "Test connection" in Settings: checks the URL, the password and the script version. */
+export async function gmailTest(): Promise<{ ok: boolean; message: string; version?: number }> {
+  if (!gmailConfigured()) return { ok: false, message: 'GMAIL_SCRIPT_URL and/or GMAIL_SCRIPT_SECRET are missing in your server variables.' };
+  try {
+    const r = await call({ action: 'quota' }, 20000);
+    const v = Number(r.version || 1);
+    if (v < 4)
+      return { ok: false, version: v, message: `Connected and the password is right, but the script is an old version (v${v}). Paste the new Code.gs, put your SECRET back, Save, run doGet → Allow, then Deploy → Manage deployments → Edit → New version.` };
+    return { ok: true, version: v, message: `Connected — password correct, script up to date (v${v}). Gmail can still send ${r.remaining} emails today.` };
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    if (/Wrong secret/i.test(msg))
+      return {
+        ok: false,
+        message: `Wrong secret. The password on this server has ${secret().length} characters. Open your GMAIL_SCRIPT_URL in a browser: it shows "passwordLength" and "version" of the LIVE script. If the version is missing or below 4, the link runs an old copy — deploy a New version (or put the newest deployment's URL in GMAIL_SCRIPT_URL). If the lengths differ, the passwords differ.`
+      };
+    return { ok: false, message: msg };
   }
 }
 

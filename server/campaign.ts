@@ -22,7 +22,7 @@ import {
   EMAIL_SEARCH_V
 } from './agent';
 import { loadState, saveState, mergeInvestors } from './store';
-import { audienceOf, AUDIENCE_TEXT } from '../src/data/audience';
+import { audienceOf, AUDIENCE_TEXT, isNotFundraisingExpert } from '../src/data/audience';
 import type { Campaign, CampaignCandidate, StartupProfile, AppSettings, PipelineExecutionLog, Investor } from '../src/types';
 
 const PACE_MS = () => Number(process.env.AGENT_PACE_MS || 8000);
@@ -309,7 +309,7 @@ async function runWorker() {
           }
           cand.quickScore = r.score;
           cand.quickReason = r.reason;
-          if (!r.isInvestor || r.score < minKeep || r.upfront || r.outside) {
+          if (!r.isInvestor || r.score < minKeep || r.upfront || r.outside || (audience === 'experts' && isNotFundraisingExpert(cand))) {
             cand.stage = 'skipped';
             if (r.upfront) upfrontSkips++;
             if (r.outside) outsideSkips++;

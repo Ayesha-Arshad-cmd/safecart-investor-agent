@@ -52,15 +52,24 @@ export const EXPERT_TYPES = [
   'Startup Advisor'
 ] as const;
 
+/** Fundraising experts = people whose job is RAISING MONEY for startups (not lawyers, designers, accountants, agencies). */
 const EXPERT_ROLES = [
   'fundraising consultant',
   'fundraising advisor',
-  'startup fundraising coach',
-  'pitch deck consultant',
-  'fractional cfo',
-  'startup advisor',
-  'capital raising advisor'
+  'capital raising advisor',
+  'startup fundraising consultant',
+  'investor relations consultant',
+  'capital raising consultant',
+  'fundraising partner'
 ];
+
+/** Lawyers, accountants, agencies… are NOT fundraising experts — never kept, never emailed. */
+export const NOT_FUNDRAISING_EXPERT =
+  /\b(attorneys?|lawyers?|law (firm|group|office|offices)|legal|llp|esq\.?|counsel|paralegal|cpa|accountants?|accounting|bookkeep\w*|tax (advisor|services)|marketing agency|digital agency|seo|web design|graphic design|pitch deck design\w*|deck designer|presentation design\w*|software|saas|crm|recruit\w*|staffing|insurance|real estate|realtor|mortgage)\b/i;
+
+export function isNotFundraisingExpert(x: { name?: string; firm?: string; title?: string; investorType?: string }): boolean {
+  return x.investorType === 'Startup Lawyer' || NOT_FUNDRAISING_EXPERT.test(`${x.title || ''} ${x.firm || ''} ${x.name || ''}`);
+}
 
 /** Search plan for fundraising experts. kw = themes from "Your App" (e.g. kids fintech), city = your city. */
 export function expertQueries(kw: string[], city: string): { linkedin: string[]; web: string[] } {
@@ -71,12 +80,9 @@ export function expertQueries(kw: string[], city: string): { linkedin: string[];
   const web = [
     'startup fundraising consultant pre-seed seed round',
     `fundraising consultant for startups ${pick(0)}`,
-    'fundraising coach for founders seed round',
-    'pitch deck consultant for startups investors',
-    'startup financial model consultant fundraising',
-    `fractional CFO startups fundraising ${place}`,
-    `startup lawyer SAFE seed round ${place}`,
-    'boutique investment bank early stage startups capital raise',
+    'fundraising advisor helps startups raise seed round investor network',
+    `capital raising advisor startups ${place}`,
+    'fundraising consultant angel investor network startups',
     // experts who publish a way to email them (they sell a service, so many do)
     '"fundraising consultant" "contact" email startups',
     '"book a call" fundraising advisor startups',

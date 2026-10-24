@@ -11,6 +11,8 @@ import { AiScoringTab } from './components/AiScoringTab';
 import { MauticCampaignsTab } from './components/MauticCampaignsTab';
 import { Investor, StartupProfile, AppSettings, OutreachStatus, HealthInfo, Audience } from './types';
 import { audienceOf, textFor } from './data/audience';
+import { excludedReason } from './data/filters';
+import { targetGeo } from './data/geo';
 import {
   loadStoredInvestors,
   saveStoredInvestors,
@@ -165,7 +167,9 @@ export default function App() {
   const T = textFor(audience);
   // people who ask for money upfront are filtered out of every tab (the list tab can show them on request)
   const [showUpfront, setShowUpfront] = useState(false);
-  const asksUpfront = (i: Investor) => i.upfrontFee === 'yes';
+  // hidden: asks for money upfront, outside the USA (your business country), or not really a fundraising expert
+  const geo = targetGeo(startup.location);
+  const asksUpfront = (i: Investor) => !!excludedReason(i, geo);
   const inList = investors.filter(i => audienceOf(i) === audience);
   const hiddenUpfront = inList.filter(asksUpfront).length;
   const visible = showUpfront ? inList : inList.filter(i => !asksUpfront(i));

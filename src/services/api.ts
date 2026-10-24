@@ -106,9 +106,12 @@ export const api = {
   sendEmail: (to: string, subject: string, body: string, replyTo?: string, fromName?: string, label?: string) =>
     call<{ ok: boolean; error?: string }>('POST', '/api/email/send', { to, subject, body, replyTo, fromName, label }),
 
+  /** Settings → "Test connection": is the Gmail helper reachable, the password right, the script up to date? */
+  gmailTest: () => call<{ ok: boolean; message: string; version?: number }>('GET', '/api/gmail/test'),
+
   /** Creates a Google Sheet of the chosen list in your Google Drive and returns its link. */
   sheet: (audience: 'investors' | 'experts', includeHidden = false) =>
-    call<{ url: string; rows: number }>('POST', '/api/sheet', { audience, includeHidden }),
+    call<{ url: string; rows: number; tabs?: number }>('POST', '/api/sheet', { audience, includeHidden }),
 
   runAgent: (startup: StartupProfile, settings: AppSettings, investors: Investor[], refreshProduct = false) =>
     call<{ jobId: string }>('POST', '/api/agent/run', { startup, settings, existing: existingOf(investors), refreshProduct }),

@@ -13,7 +13,9 @@ import { searchProviderNames, webSearch } from './search';
 import { emailProvider, sendEmail } from './email';
 import { loadState, saveState, storageInfo, flushNow, mergeInvestors, clearInvestors, restoreFromBackup, shutdownSave } from './store';
 import { audienceOf, AUDIENCE_TEXT } from '../src/data/audience';
-import { gmailConfigured, gmailSheet } from './gmail';
+import { gmailConfigured, gmailSheet, gmailTest } from './gmail';
+import { excludedReason } from '../src/data/filters';
+import { targetGeo } from '../src/data/geo';
 import { startCampaign, startUpgrade, getCampaign, pauseCampaign, resumeCampaign, resumeOnBoot } from './campaign';
 import { startAutomation, runAutomationNow, automationStatus } from './automation';
 import {
@@ -225,27 +227,102 @@ route('POST', '/api/email/send', async body => {
 
 // ---- "Open in Google Sheets": the current list as a new Google Sheet in your Drive (via the Gmail helper)
 route('POST', '/api/sheet', async body => {
-  if (!gmailConfigured()) throw Object.assign(new Error('Google Sheets needs the Gmail helper script (see README → Automatic email).'), { status: 400 });
+  if (!gmailConfigured()) throw Object.assign(new Error('the Gmail helper script is not connected to this server. Add GMAIL_SCRIPT_URL and GMAIL_SCRIPT_SECRET to your hosting variables (Railway / Render → Environment) and redeploy.'), { status: 400 });
   const st = loadState();
-  const aud = audienceOf(body);
-  const T = AUDIENCE_TEXT[aud];
-  const list = st.investors.filter((i: Investor) => audienceOf(i) === aud && (body.includeHidden || i.upfrontFee !== 'yes'));
-  const headers = [
-    'Type', 'Name', 'Title', T.One === 'Expert' ? 'Company' : 'Firm', 'Email', 'Phone', 'LinkedIn', 'Website', 'Location', 'Country',
-    'Fit score', 'Fit', 'Status', 'How they charge', 'Asks for money upfront?', T.field.stage, T.field.check, 'Industries', T.field.portfolio,
-    'Research', 'Last contacted', 'Next follow-up', 'Replied on', 'Reply / notes', 'Why they fit', 'Sources'
+  // one spreadsheet, one tab per list — the list you are looking at comes first
+  const first = audienceOf(body);
+  const order: ('investors' | 'experts')[] = first === 'experts' ? ['experts', 'investors'] : ['investors', 'experts'];
+  const tabs = [
+    ...order.map(aud => sheetTab(st.investors.filter((i: Investor) => audienceOf(i) === aud), aud)),
+    sheetTab(st.investors, 'all') // 3rd tab: everyone together, with a Type column
   ];
-  const rows = list.map((i: Investor) => [
-    T.label, i.name, i.title, i.firm, i.email, i.phone || '', i.linkedin, i.website, i.location, i.country || '',
-    i.fitScore?.total ?? '', i.fitScore?.status || '', i.outreach?.status || '', i.feeModel || '', i.upfrontFee || 'unknown',
-    i.stage, i.checkSizeFormatted, (i.industries || []).join(', '), (i.portfolio || []).join(', '),
-    i.researchDepth === 'quick' ? 'Quick scan' : 'Deep', i.outreach?.lastContactedDate || '', i.outreach?.nextFollowUpDate || '',
-    i.outreach?.replyDate || '', i.outreach?.responseNotes || '', (i.fitScore?.whyInvest || []).join(' | '), (i.sourceUrls || []).join(' ')
-  ]);
   const date = new Date().toISOString().slice(0, 10);
-  const r = await gmailSheet(`${st.startup?.name || 'Startup'} — ${T.menu} — ${date}`, T.menu, headers, rows);
-  return { url: r.url, rows: r.rows };
+  const r = await gmailSheet(`${st.startup?.name || 'Startup'} — Investors & Fundraising Experts — ${date}`, tabs);
+  return { url: r.url, rows: r.rows, tabs: r.tabs };
 });
+
+// ---- Gmail helper "Test connection" (Settings)
+route('GET', '/api/gmail/test', async () => await gmailTest());
+
+/** Everything on the person's full profile, one row each (best fit first). */
+function sheetTab(list: Investor[], aud: 'investors' | 'experts' | 'all') {
+  const both = aud === 'all';
+  const I = AUDIENCE_TEXT.investors;
+  const E = AUDIENCE_TEXT.experts;
+  const T = both ? I : AUDIENCE_TEXT[aud];
+  /** heading for a field that is named differently for investors and experts */
+  const lbl = (inv: string, exp: string) => (both ? (inv === exp ? inv : `${inv} / ${exp}`) : aud === 'experts' ? exp : inv);
+  const geo = targetGeo(loadState().startup?.location);
+  const d = (x?: string) => (x ? String(x).slice(0, 10) : '');
+  const cols: [string, (i: Investor) => string | number][] = [
+    ['Type', i => AUDIENCE_TEXT[audienceOf(i)].label],
+    ['Name', i => i.name],
+    ['Title', i => i.title],
+    [lbl('Firm', 'Company'), i => i.firm],
+    [lbl('Investor type', 'Expert type'), i => i.investorType || ''],
+    ['Filtered out?', i => excludedReason(i, geo) || 'no'],
+    ['Fit score', i => i.fitScore?.total ?? ''],
+    ['Fit', i => i.fitScore?.status || ''],
+    ['Verdict', i => i.fitScore?.verdict || ''],
+    [`${lbl(I.fit.thesis, E.fit.thesis)} match`, i => i.fitScore?.thesisMatch ?? ''],
+    [`${lbl(I.fit.stage, E.fit.stage)} match`, i => i.fitScore?.stageMatch ?? ''],
+    [`${lbl(I.fit.sector, E.fit.sector)} match`, i => i.fitScore?.sectorMatch ?? ''],
+    [`${lbl(I.fit.check, E.fit.check)} match`, i => i.fitScore?.checkSizeMatch ?? ''],
+    [`${lbl(I.fit.synergy, E.fit.synergy)} match`, i => i.fitScore?.synergyMatch ?? ''],
+    [lbl(I.field.why, E.field.why), i => (i.fitScore?.whyInvest || []).join(' | ')],
+    ['Concerns', i => (i.fitScore?.hesitations || []).join(' | ')],
+    ['Best opening hook', i => i.fitScore?.keyTalkingPoint || ''],
+    ['Email', i => i.email || ''],
+    ['Phone', i => i.phone || ''],
+    ['LinkedIn', i => i.linkedin || ''],
+    ['Twitter / X', i => i.twitter || ''],
+    ['Website', i => i.website || ''],
+    ['Best way to contact', i => i.contactRoute || ''],
+    ['Location', i => i.location || ''],
+    ['Country', i => i.country || ''],
+    [lbl(I.field.stage, E.field.stage), i => i.stage || ''],
+    [lbl(I.field.check, E.field.check), i => i.checkSizeFormatted || ''],
+    ['How they charge', i => i.feeModel || ''],
+    ['Asks for money upfront?', i => (i.upfrontFee === 'yes' ? 'YES — filtered out' : i.upfrontFee || 'unknown')],
+    ['Industries', i => (i.industries || []).join(', ')],
+    [lbl(I.field.portfolio, E.field.portfolio), i => (i.portfolio || []).join(', ')],
+    [lbl('Recent investments', 'Raises / clients they helped'), i => (i.recentInvestments || []).map(r => [r.name, r.year, r.sector, r.note].filter(Boolean).join(' · ')).join(' | ')],
+    [lbl(I.field.thesis, E.field.thesis), i => i.thesis || ''],
+    ['Research notes', i => i.researchNotes || ''],
+    ['Key quotes', i => (i.extractedData?.keyQuotes || []).join(' | ')],
+    ['Research', i => (i.researchDepth === 'quick' ? 'Quick scan only' : 'Deep research')],
+    ['Quick-scan score', i => i.quickScore ?? ''],
+    ['Outreach status', i => i.outreach?.status || ''],
+    ['Emails sent', i => `${i.outreach?.sentStepsCount || 0} of ${i.outreach?.sequences?.length || 0}`],
+    ['Auto-email', i => (i.outreach?.autoPaused ? 'paused' : 'on')],
+    ['Last contacted', i => d(i.outreach?.lastContactedDate)],
+    ['Next follow-up', i => d(i.outreach?.nextFollowUpDate)],
+    ['Replied on', i => d(i.outreach?.replyDate)],
+    ['Reply / meeting notes', i => i.outreach?.responseNotes || ''],
+    ['LinkedIn request sent', i => d(i.outreach?.linkedinRequestSentAt)],
+    ['LinkedIn accepted', i => d(i.outreach?.linkedinAcceptedAt)],
+    ['LinkedIn messaged', i => d(i.outreach?.linkedinMessagedAt)],
+    ['LinkedIn note', i => i.linkedinNote || ''],
+    ['LinkedIn message', i => i.linkedinMessage || '']
+  ];
+  for (let k = 0; k < 4; k++) {
+    cols.push([`Email ${k + 1} subject`, i => i.outreach?.sequences?.[k]?.subject || '']);
+    cols.push([`Email ${k + 1} (day ${[0, 4, 10, 21][k]})`, i => i.outreach?.sequences?.[k]?.body || '']);
+    cols.push([`Email ${k + 1} sent`, i => d(i.outreach?.sequences?.[k]?.sentAt)]);
+  }
+  cols.push(
+    ['Website page title', i => i.extractedData?.pageTitle || ''],
+    ['Sources', i => (i.sourceUrls || []).join(' ')],
+    ['Tags', i => (i.tags || []).join(', ')],
+    ['Added on', i => d(i.createdAt)],
+    ['Updated on', i => d(i.updatedAt)]
+  );
+  // shown first: people you can work with, best fit first; filtered-out ones at the bottom
+  const out = (i: Investor) => (excludedReason(i, geo) ? 1 : 0);
+  const sorted = [...list].sort((a, b) => out(a) - out(b) || (b.fitScore?.total || 0) - (a.fitScore?.total || 0));
+  void T;
+  return { name: both ? 'All (Investors + Experts)' : aud === 'experts' ? 'Fundraising Experts' : 'Investors', headers: cols.map(c => c[0]), rows: sorted.map(i => cols.map(c => c[1](i) ?? '')) };
+}
 
 route('POST', '/api/agent/run', body => {
   need(body.startup?.name, 'startup required');

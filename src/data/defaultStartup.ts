@@ -59,5 +59,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   dailyEmailLimit: 25,
   emailHoldMinutes: 60,
   companyAddress: '',
-  linkedinDailyLimit: 20
+  linkedinDailyLimit: 20,
+  bookingLink: ''
 };

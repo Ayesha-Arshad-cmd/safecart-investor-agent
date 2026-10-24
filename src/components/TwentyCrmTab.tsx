@@ -18,7 +18,6 @@ import { textFor } from '../data/audience';
 import { openInGoogleSheets } from '../services/sheets';
 import { TwentyTable } from './TwentyTable';
 import { TwentyKanban } from './TwentyKanban';
-import { exportInvestorsToCsv, exportToTwentyCrmJson, exportToMauticCsv } from '../services/crmStorage';
 
 interface TwentyCrmTabProps {
   investors: Investor[];
@@ -98,42 +97,6 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
   const pctOf = (n: number) => (researched.length ? Math.round((n / researched.length) * 100) : 0);
   const emailPct = pctOf(researched.filter(i => !!i.email).length);
   const phonePct = pctOf(researched.filter(i => !!i.phone).length);
-
-  const handleDownloadCsv = () => {
-    const csv = exportInvestorsToCsv(filteredInvestors);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${audience === 'experts' ? 'fundraising_experts' : 'investors'}_${startup.name.toLowerCase().replace(/\s+/g, '_')}_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleDownloadTwentyJson = () => {
-    const json = exportToTwentyCrmJson(filteredInvestors);
-    const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `twenty_crm_records_${Date.now()}.json`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleDownloadMauticCsv = () => {
-    const csv = exportToMauticCsv(filteredInvestors);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `mautic_campaign_contacts_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
 
   const handleCreateCustomLead = (e: React.FormEvent) => {
     e.preventDefault();
@@ -260,8 +223,8 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
         <div className="text-xs rounded-lg border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
           <span>
             {showHidden
-              ? `Showing ${hiddenCount} ${T.many} who ask for money upfront (normally hidden — they are never auto-emailed).`
-              : `${hiddenCount} ${hiddenCount === 1 ? T.one : T.many} hidden because they ask for money upfront (retainer, application or pitch fee).`}
+              ? `Showing ${hiddenCount} filtered-out ${T.many} (normally hidden — they are never emailed).`
+              : `${hiddenCount} filtered out: they ask for money upfront, are outside the USA${audience === 'experts' ? ', or are not real fundraising experts (law firms, accountants, agencies…)' : ''}. They are never emailed.`}
           </span>
           {onToggleHidden && (
             <button onClick={onToggleHidden} className="underline font-medium cursor-pointer">
@@ -355,7 +318,7 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
             <button
               onClick={async () => {
                 setSheetBusy(true);
-                await openInGoogleSheets(audience, handleDownloadCsv, showToast);
+                await openInGoogleSheets(audience, showToast);
                 setSheetBusy(false);
               }}
               disabled={sheetBusy}

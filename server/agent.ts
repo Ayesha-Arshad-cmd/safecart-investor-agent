@@ -9,9 +9,9 @@
  *   runAgentJob                  → does all of it in one click, with a live log
  */
 import { chatJson } from './ai';
-import { Audience, audienceOf, expertQueries, EXPERT_TYPES } from '../src/data/audience';
+import { Audience, audienceOf, expertQueries, EXPERT_TYPES, isNotFundraisingExpert } from '../src/data/audience';
 import { targetGeo, geoRule, withGeo, outsideTarget } from '../src/data/geo';
-import { TEMPLATE_V, INVESTOR_MODEL_EMAIL, INVESTOR_RULES, EXPERT_MODEL_EMAIL, expertRules } from '../src/data/emailTemplates';
+import { TEMPLATE_V, buildEmails, buildLinkedIn } from '../src/data/emailTemplates';
 import { webSearch, SearchResult, isLinkedInProfile, normalizeLinkedInUrl } from './search';
 import { readPage, pickUsefulSubpages, canFetch, extractEmails, PageContent } from './reader';
 import type {
@@ -49,7 +49,7 @@ const isExp = (a?: Audience | string) => a === 'experts';
 const expType = (t: InvestorType, exp: boolean): InvestorType =>
   exp && !(EXPERT_TYPES as readonly string[]).includes(t) && t !== 'Accelerator' ? 'Other' : t;
 const typeList = (a?: Audience | string) =>
-  isExp(a) ? `${EXPERT_TYPES.join(' | ')} | Accelerator | Other` : 'Angel | VC Fund | Micro-VC | Family Office | Angel Group | Accelerator | Corporate VC | Other';
+ isExp(a) ? 'Fundraising Consultant | Fundraising Advisor | Investment Banker | Other' : 'Angel | VC Fund | Micro-VC | Family Office | Angel Group | Accelerator | Corporate VC | Other';
 const STAGES: InvestmentStage[] = ['Pre-seed', 'Seed', 'Series A', 'Growth', 'All Stages', 'Unknown'];
 const asType = (t: any): InvestorType => INVESTOR_TYPES.find(x => x.toLowerCase() === String(t || '').toLowerCase()) || 'Other';
 const asStage = (s: any): InvestmentStage => {
@@ -307,8 +307,8 @@ export async function extractCandidates(
       parsed = await chatJson<any>(
         exp
           ? `You extract REAL, specific FUNDRAISING EXPERTS from search results — people or small firms who help startups raise money. ${HONESTY_RULES}
-Only include someone if the evidence text itself names them AND shows they help startups raise capital: fundraising consultant / advisor / coach, pitch deck consultant, financial-model consultant, fractional CFO who supports raises, startup lawyer for financings (SAFEs, seed rounds), boutique investment banker or placement agent for early-stage raises.
-Skip investors who only invest, journalists, recruiters, generic articles, software tools, and the startup itself.
+Only include someone if the evidence text itself names them AND shows their job is RAISING MONEY for startups: fundraising consultant / advisor, capital-raising advisor, someone who introduces startups to angel investors and VCs, or a boutique placement agent for early-stage raises.
+NEVER include: lawyers, attorneys or law firms (even startup / venture lawyers), accountants / CPAs, pitch-deck designers, financial-model builders, marketing or web agencies, software tools, recruiters, journalists, investors who only invest, generic articles, and the startup itself.
 ${geoRule(geo)}
 ${NO_UPFRONT_RULE} Skip anyone whose evidence shows they charge founders upfront.`
           : `You extract REAL, specific investors from search results for a startup's fundraising. ${HONESTY_RULES}
@@ -343,6 +343,7 @@ Return JSON: {"investors":[{
       const name = str(c.name, 120);
       if (!name || name.length < 3) continue;
       if (outsideTarget(`${str(c.country, 80)} ${str(c.location, 120)}`, geo)) continue; // not in the target country
+      if (exp && isNotFundraisingExpert({ name, firm: str(c.firm, 120), title: str(c.title, 120) })) continue; // law firm, agency…
       const firm = str(c.firm, 120) || (exp ? 'Independent' : 'Independent Angel');
       const key = normKey(name) + '|' + normKey(firm);
       if (seen.has(key) || seenNames.has(normKey(name))) continue;
@@ -506,30 +507,14 @@ function normalizeSequence(seq: any): EmailSequenceStep[] {
   }));
 }
 
-const OUTREACH_SPEC = (s: StartupProfile, settings?: Partial<AppSettings>, audience?: Audience) => `"outreach": {
-  "sequence": [4 emails: {"stepName","dayDelay" (0,4,10,21),"subject","body","rationale"}],
-  "linkedinNote": "LinkedIn connection request note, MAX 280 characters, personal, no links",
-  "linkedinMessage": "LinkedIn DM to send after they accept, 60-110 words"
-}
-Outreach rules: write as ${senderName(s, settings)}, founder of ${s.name} (use the company name "${s.name}" and the sender name "${senderName(s, settings)}" wherever the model email has its own names).
-${
+/**
+ * The emails themselves are fixed templates (src/data/emailTemplates.ts) — the AI only writes ONE sentence about the person.
+ */
+const OUTREACH_SPEC = (_s: StartupProfile, _settings?: Partial<AppSettings>, audience?: Audience) => `"personalLine": "ONE sentence (max 35 words) for the email, written as the founder to this person, about a SPECIFIC fact from the evidence — ${
   isExp(audience)
-    ? `This person is a FUNDRAISING EXPERT, not an investor — never pitch them to invest.
-MODEL EXPERT EMAIL (copy its structure, facts and terms; change only the names and add the one personal sentence):
-"""
-${EXPERT_MODEL_EMAIL}
-"""
-${expertRules()}
-Follow-ups (emails 2-4) are 40-90 words, refer back to the partnership offer (same terms, nothing new), and the last one politely closes the loop.
-LinkedIn note: mention we're looking for a fundraising partner on a performance basis (success fee, no upfront fees).`
-    : `MODEL INVESTOR EMAIL (copy its structure and tone; change only the names and add the one personal sentence):
-"""
-${INVESTOR_MODEL_EMAIL}
-"""
-${INVESTOR_RULES}
-Follow-ups (emails 2-4) are 40-90 words, add one new useful point each, and the last one politely closes the loop.`
-}
-Plain text, no placeholders like [Name]. Do not claim traction, users, revenue or partners that were not given in the startup profile.`;
+    ? 'e.g. a startup they helped raise, their investor network, or their fundraising focus. Example: \"I came across your work helping early-stage consumer startups raise their seed rounds, which is exactly the experience we are looking for.\"'
+    : 'e.g. a portfolio company, their sector focus or something they said. Example: \"I noticed your investment in Greenlight, and I believe SafeCartKids shares the same mission of empowering families.\"'
+}. Use ONLY facts from the evidence; if there is nothing specific, return \"\"."`;
 
 export async function researchCandidate(
   s: StartupProfile,
@@ -625,7 +610,7 @@ export async function researchCandidate(
 
   const out = await chatJson<any>(
     exp
-      ? `You research FUNDRAISING EXPERTS (consultants, advisors, pitch-deck / financial-model specialists, fractional CFOs, startup lawyers, boutique bankers) who could help ${s.name} raise its round, and you write outreach to them. Today is ${today()}. ${HONESTY_RULES}`
+      ? `You research FUNDRAISING EXPERTS — people whose job is raising money for startups (fundraising consultants / advisors, capital-raising advisors, investor-introduction partners) — who could help ${s.name} raise its pre-seed round. Today is ${today()}. ${HONESTY_RULES}`
       : `You are a VC research analyst + fundraising copywriter for ${s.name}. Today is ${today()}. ${HONESTY_RULES}`,
     `STARTUP:
 ${startupBrief(s)}
@@ -665,7 +650,7 @@ Return JSON:
    "upfrontFee": "yes | no | unknown — yes ONLY if evidence shows founders must pay them before anything happens (retainer, monthly fee, application / pitch / membership fee, paid program, due-diligence fee)",
    "feeModel": "${exp ? 'how they charge, from evidence (e.g. success fee only, commission on funds raised, retainer + success fee, hourly), else Unknown' : 'any fee they charge founders (e.g. pitch fee, membership), else None'}"
  },
- "isRealInvestor": true/false (${exp ? 'false if evidence suggests they do NOT actually help startups raise money' : 'false if evidence suggests this is not an active investor'}),
+ "isRealInvestor": true/false (${exp ? 'false if they are a lawyer / law firm, accountant, designer, agency, software tool, or do NOT actually raise money for startups' : 'false if evidence suggests this is not an active investor'}),
  "fit": {"thesisMatch":0-100,"stageMatch":0-100,"sectorMatch":0-100,"checkSizeMatch":0-100,"synergyMatch":0-100,"total":0-100,
          "verdict":"one sentence","whyInvest":["3 evidence-based reasons ${exp ? 'they could help' : ''}"],"hesitations":["2 honest concerns"],"keyTalkingPoint":"the single best hook for outreach"},
  "researchNotes": "4-6 sentences: who they are, ${exp ? 'what fundraising help they offer and for whom' : 'what they invest in'}, what you could NOT verify",
@@ -701,6 +686,12 @@ Scoring guide: 80+ = clearly helps early-stage consumer startups raise, with evi
   }
   const upfrontFee: 'yes' | 'no' | 'unknown' = /^yes/i.test(str(p.upfrontFee)) ? 'yes' : /^no/i.test(str(p.upfrontFee)) ? 'no' : 'unknown';
   const feeModel = str(p.feeModel, 160);
+  const notExpert = exp && (out?.isRealInvestor === false || isNotFundraisingExpert({ name: c.name, firm: str(p.firm, 120) || c.firm, title: str(p.title, 120) || c.title, investorType: str(p.investorType) }));
+  if (notExpert) {
+    fit.total = Math.min(fit.total, 10);
+    fit.status = 'cold';
+    fit.hesitations = ['Not a fundraising expert (e.g. law firm, accountant, designer or agency) — filtered out.', ...fit.hesitations].slice(0, 5);
+  }
   if (upfrontFee === 'yes') {
     fit.total = Math.min(fit.total, 15);
     fit.status = 'cold';
@@ -723,6 +714,7 @@ Scoring guide: 80+ = clearly helps early-stage consumer startups raise, with evi
   const verifiedEmail = aiPick || (trustedSite ? bestEmail(emailList, c.name, siteRoot) : '');
   const portfolio = arr(p.portfolio, 25);
   const now = new Date().toISOString();
+  const li = buildLinkedIn(audience, { name: c.name, firm: str(p.firm, 120) || c.firm }, settings?.bookingLink);
 
   return {
     id: uid('inv'),
@@ -771,18 +763,18 @@ Scoring guide: 80+ = clearly helps early-stage consumer startups raise, with evi
       detectedContactEmail: verifiedEmail
     },
     sourceUrls: [...sources].slice(0, 8),
-    linkedinNote: str(out?.outreach?.linkedinNote, 300),
-    linkedinMessage: str(out?.outreach?.linkedinMessage, 1500),
+    linkedinNote: li.note,
+    linkedinMessage: li.message,
     outreach: {
       status: fit.status === 'hot' ? 'hot' : fit.status === 'warm' ? 'warm' : 'researched',
       sequenceGenerated: true,
-      sequences: normalizeSequence(out?.outreach?.sequence),
+      sequences: buildEmails(audience, { name: c.name, firm: str(p.firm, 120) || c.firm }, str(out?.personalLine, 400), settings?.bookingLink),
       templateV: TEMPLATE_V,
       sentStepsCount: 0,
       // never auto-email someone who wants money upfront or is outside the target country
-      autoPaused: upfrontFee === 'yes' || outside ? true : undefined
+      autoPaused: upfrontFee === 'yes' || outside || notExpert ? true : undefined
     },
-    tags: ['AI researched', c.investorType, linkedin ? 'LinkedIn found' : '', upfrontFee === 'yes' ? 'Asks for upfront fee' : '', outside ? 'Outside target country' : ''].filter(Boolean) as string[],
+    tags: ['AI researched', c.investorType, linkedin ? 'LinkedIn found' : '', upfrontFee === 'yes' ? 'Asks for upfront fee' : '', outside ? 'Outside target country' : '', notExpert ? 'Not a fundraising expert' : ''].filter(Boolean) as string[],
     researchDepth: 'deep',
     createdAt: now,
     updatedAt: now
@@ -821,15 +813,23 @@ export async function generateOutreach(
   i: Investor,
   settings?: Partial<AppSettings>
 ): Promise<{ sequences: EmailSequenceStep[]; linkedinNote: string; linkedinMessage: string; templateV: number }> {
-  const out = await chatJson<any>(
-    `You are an expert fundraising copywriter for ${s.name}. ${HONESTY_RULES}`,
-    `STARTUP:\n${startupBrief(s)}\n\n${isExp(i.audience) ? 'FUNDRAISING EXPERT' : 'INVESTOR'}:\n${investorBrief(i)}\nBest hook: ${i.fitScore?.keyTalkingPoint || ''}\n\nReturn JSON: {${OUTREACH_SPEC(s, settings, audienceOf(i))}}`,
-    3000
-  );
+  const audience = audienceOf(i);
+  let personal = '';
+  try {
+    const out = await chatJson<any>(
+      `You write ONE personal sentence for ${s.name}'s outreach email. ${HONESTY_RULES}`,
+      `${isExp(audience) ? 'FUNDRAISING EXPERT' : 'INVESTOR'}:\n${investorBrief(i)}\nBest hook: ${i.fitScore?.keyTalkingPoint || ''}\n\nReturn JSON: {${OUTREACH_SPEC(s, settings, audience)}}`,
+      400
+    );
+    personal = str(out?.personalLine, 400);
+  } catch {
+    personal = ''; // the template still works without the personal sentence
+  }
+  const li = buildLinkedIn(audience, { name: i.name, firm: i.firm }, settings?.bookingLink);
   return {
-    sequences: normalizeSequence(out?.outreach?.sequence ?? out?.sequence),
-    linkedinNote: str(out?.outreach?.linkedinNote ?? out?.linkedinNote, 300),
-    linkedinMessage: str(out?.outreach?.linkedinMessage ?? out?.linkedinMessage, 1500),
+    sequences: buildEmails(audience, { name: i.name, firm: i.firm }, personal, settings?.bookingLink),
+    linkedinNote: li.note,
+    linkedinMessage: li.message,
     templateV: TEMPLATE_V
   };
 }
@@ -990,7 +990,7 @@ Return JSON: {"scores":[{"n":1,"score":0-100,"isInvestor":true/false,"upfrontFee
 "outsideCountry": true ONLY if the text shows they are based outside the ${geo.country}.
 ${
   exp
-    ? `"isInvestor" here means: true if they really help startups raise money (consultant, advisor, coach, pitch deck / financial model expert, fractional CFO, startup lawyer, boutique banker); false otherwise.
+    ? `"isInvestor" here means: true ONLY if their job is raising money for startups (fundraising consultant / advisor, capital-raising advisor, investor-introduction partner, early-stage placement agent); false for lawyers / law firms, accountants, designers, agencies, software, recruiters and anyone else.
 Scoring: 75+ clearly helps early-stage consumer / kids / fintech / edtech startups raise; 50-74 general startup fundraising help; <50 weak, unclear, or only late-stage / big companies. Be strict when the text is thin.`
     : `Scoring: 75+ clear thesis/stage fit for a kids/family consumer app at pre-seed; 50-74 adjacent (consumer, edtech, fintech, local angel); <50 weak or unclear. Be strict when the text is thin.`
 }`,
@@ -1051,7 +1051,7 @@ Prefer experts who work on a success fee / commission (paid from money actually 
 Queries ALREADY USED (do not repeat or lightly reword them):
 ${used.slice(-120).join('\n') || '(none)'}
 
-Write ${count} NEW, varied Google queries that surface SPECIFIC people or small firms who help startups like this raise money: fundraising consultants, fundraising advisors / coaches, pitch deck consultants, financial-model consultants, fractional CFOs, startup lawyers for SAFEs / seed rounds, boutique investment banks for early-stage raises. Mix:
+Write ${count} NEW, varied Google queries that surface SPECIFIC people or small firms who help startups like this raise money: fundraising consultants, fundraising advisors, capital-raising advisors and people who introduce startups to angel investors and VCs. NEVER lawyers / law firms, accountants, pitch-deck designers or agencies. Mix:
 - about a third that find PUBLIC LinkedIn profiles: must start with site:linkedin.com/in and use quoted phrases (roles + themes like consumer apps, fintech, edtech, kids, or cities)
 - about a third that find experts who publish a way to contact them (e.g. "book a call", "contact", "email us")
 - the rest: lists and directories of such experts, and experts who mention helping companies similar to this one

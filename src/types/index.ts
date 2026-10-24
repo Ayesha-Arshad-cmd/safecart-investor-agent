@@ -217,6 +217,9 @@ export interface AppSettings {
   // ---- LinkedIn ----
   linkedinDailyLimit: number;
 
+  /** Google Calendar booking page link put in investor emails ("schedule a time that works best for you here"). */
+  bookingLink?: string;
+
   /** What the app is looking for right now (dropdown at the top). Missing = 'investors'. */
   audience?: Audience;
 }

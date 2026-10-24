@@ -25,7 +25,6 @@ const withTag = (msg: string) => {
     msg
   );
 };
-import { exportToMauticCsv } from '../services/crmStorage';
 import { api, gmailComposeUrl, mailtoUrl, linkedinSearchUrl, addDays, todayIso } from '../services/api';
 
 interface Props {
@@ -266,17 +265,6 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
     }
   };
 
-  const exportCsv = () => {
-    const csv = exportToMauticCsv(investors);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${startup.name.replace(/\s+/g, '_')}_outreach_${today}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const spamWords = ['guarantee', 'free', '100%', 'risk-free', 'buy now', 'urgent', 'winner', 'millionaire', '$$$'];
   const spam = spamWords.filter(w => `${subject} ${body}`.toLowerCase().includes(w));
   const words = body.split(/\s+/).filter(Boolean).length;
@@ -292,7 +280,7 @@ export const MauticCampaignsTab: React.FC<Props> = ({ investors, startup, settin
         <button
           onClick={async () => {
             setSheetBusy(true);
-            await openInGoogleSheets(audienceOf(settings), exportCsv, showToast);
+            await openInGoogleSheets(audienceOf(settings), showToast);
             setSheetBusy(false);
           }}
           disabled={sheetBusy}

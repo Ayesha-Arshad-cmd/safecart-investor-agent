@@ -24,20 +24,31 @@
  * Limits (set by Google): about 100 emails/day on a normal Gmail, 1,500/day on Google Workspace.
  */
 
-const SECRET = 'creation.agent';
+const SECRET = 'CHANGE-ME-to-a-long-random-password';
 
+const VERSION = 4;
+
+/** Open the Web app URL in a browser to check what is live: version + how many characters the password has. */
 function doGet() {
-  return json_({ ok: true, service: 'SafeCart Kids Gmail helper', remaining: MailApp.getRemainingDailyQuota() });
+  const set = !!SECRET && SECRET.indexOf('CHANGE-ME') !== 0;
+  return json_({
+    ok: true,
+    service: 'SafeCart Kids Gmail helper',
+    version: VERSION,
+    passwordSet: set,
+    passwordLength: set ? String(SECRET).trim().length : 0,
+    remaining: MailApp.getRemainingDailyQuota()
+  });
 }
 
 function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if (!SECRET || SECRET.indexOf('CHANGE-ME') === 0) return json_({ ok: false, error: 'Set SECRET in the script first.' });
-    if (req.secret !== SECRET) return json_({ ok: false, error: 'Wrong secret' });
+    if (String(req.secret || '').trim() !== String(SECRET).trim()) return json_({ ok: false, error: 'Wrong secret' });
     if (req.action === 'send') return json_(send_(req));
     if (req.action === 'check') return json_(check_(req));
-    if (req.action === 'quota') return json_({ ok: true, remaining: MailApp.getRemainingDailyQuota(), version: 3 });
+    if (req.action === 'quota') return json_({ ok: true, remaining: MailApp.getRemainingDailyQuota(), version: VERSION });
     if (req.action === 'sheet') return json_(sheet_(req));
     if (req.action === 'saveData') return json_(saveData_(req));
     if (req.action === 'loadData') return json_(loadData_(req));
@@ -113,22 +124,32 @@ function label_(name) {
   return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
 }
 
-/** Creates a Google Sheet in your Drive from the app's list and returns its link. */
+/** Creates ONE Google Sheet in your Drive — one tab per list (Investors, Fundraising Experts) — and returns its link. */
 function sheet_(req) {
-  const headers = req.headers || [];
-  const rows = req.rows || [];
-  if (!headers.length) return { ok: false, error: 'Nothing to export' };
+  const tabs = (req.tabs && req.tabs.length) ? req.tabs : [{ name: req.tab || 'List', headers: req.headers || [], rows: req.rows || [] }];
+  if (!tabs.some(function (t) { return t.headers && t.headers.length; })) return { ok: false, error: 'Nothing to export' };
   const ss = SpreadsheetApp.create(String(req.title || 'SafeCart Kids list'));
-  const sh = ss.getSheets()[0];
-  sh.setName(String(req.tab || 'List').slice(0, 90));
-  const data = [headers].concat(rows.map(function (r) {
-    return headers.map(function (_h, i) { return r[i] == null ? '' : String(r[i]).slice(0, 49000); });
-  }));
-  sh.getRange(1, 1, data.length, headers.length).setValues(data);
-  sh.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#e8f5ee');
-  sh.setFrozenRows(1);
-  sh.autoResizeColumns(1, Math.min(headers.length, 8));
-  return { ok: true, url: ss.getUrl(), id: ss.getId(), rows: rows.length };
+  let total = 0;
+  tabs.forEach(function (t, k) {
+    const headers = t.headers || [];
+    if (!headers.length) return;
+    const rows = t.rows || [];
+    const sh = k === 0 ? ss.getSheets()[0] : ss.insertSheet();
+    sh.setName(String(t.name || ('List ' + (k + 1))).slice(0, 90));
+    const data = [headers].concat(rows.map(function (r) {
+      return headers.map(function (_h, i) { return r[i] == null ? '' : String(r[i]).slice(0, 49000); });
+    }));
+    sh.getRange(1, 1, data.length, headers.length).setValues(data);
+    sh.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#e8f5ee').setWrap(true);
+    // long text stays on one line (click a cell to read it all)
+    if (data.length > 1) sh.getRange(2, 1, data.length - 1, headers.length).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setVerticalAlignment('top');
+    sh.setFrozenRows(1);
+    sh.setFrozenColumns(Math.min(2, headers.length));
+    sh.setColumnWidths(1, headers.length, 160);
+    sh.getRange(1, 1, data.length, headers.length).createFilter();
+    total += rows.length;
+  });
+  return { ok: true, url: ss.getUrl(), id: ss.getId(), rows: total, tabs: tabs.length };
 }
 
 // ---------------------------------------------------------------- data backup (Google Drive)
