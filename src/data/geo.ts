@@ -48,7 +48,8 @@ const US_HINT = new RegExp(`\\b(usa|united states|u\\.s\\.|america|${STATE_NAMES
 export function withGeo(q: string, g: TargetGeo): string {
   if (g.isUS) {
     if (US_HINT.test(q)) return q;
-    return /site:linkedin\.com/i.test(q) ? `${q} "United States"` : `${q} USA`;
+    // unquoted, so it only nudges the search towards the USA instead of filtering everything out
+    return /site:linkedin\.com/i.test(q) ? `${q} United States` : `${q} USA`;
   }
   return q.toLowerCase().includes(g.country.toLowerCase()) ? q : `${q} "${g.country}"`;
 }

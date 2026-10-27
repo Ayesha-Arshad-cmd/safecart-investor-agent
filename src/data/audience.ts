@@ -75,7 +75,8 @@ export function isNotFundraisingExpert(x: { name?: string; firm?: string; title?
 export function expertQueries(kw: string[], city: string): { linkedin: string[]; web: string[] } {
   const k = kw.length ? kw : ['consumer apps', 'fintech', 'edtech'];
   const pick = (i: number) => k[i % k.length];
-  const linkedin = EXPERT_ROLES.map((r, i) => `site:linkedin.com/in "${r}" ${i % 2 ? '"pre-seed"' : `"${pick(i)}"`}`);
+  // experts rarely write our themes (kids fintech…) on their profile — role + "startups" finds them
+  const linkedin = EXPERT_ROLES.map((r, i) => `site:linkedin.com/in "${r}" ${i % 2 ? 'pre-seed' : 'startups'}`);
   const place = city || 'United States';
   const web = [
     'startup fundraising consultant pre-seed seed round',

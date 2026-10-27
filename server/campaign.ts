@@ -23,6 +23,8 @@ import {
 } from './agent';
 import { loadState, saveState, mergeInvestors } from './store';
 import { audienceOf, AUDIENCE_TEXT, isNotFundraisingExpert } from '../src/data/audience';
+import { comboQueries } from '../src/data/queries';
+import { targetGeo } from '../src/data/geo';
 import type { Campaign, CampaignCandidate, StartupProfile, AppSettings, PipelineExecutionLog, Investor } from '../src/types';
 
 const PACE_MS = () => Number(process.env.AGENT_PACE_MS || 8000);
@@ -199,6 +201,9 @@ async function runWorker() {
       const base = defaultQueries(startup, settings);
       let queries = [...base.linkedin, ...base.web].filter(q => !usedSet.has(`${q}|1`.toLowerCase()));
       const want = Math.min(60, Math.max(12, Math.ceil(c.target / 4)));
+      // simple role + US city searches first (reliable, no AI needed), then AI ideas for the rest
+      const g = targetGeo(startup.location);
+      queries.push(...comboQueries(audience, new Set([...usedSet, ...queries.map(q => `${q}|1`.toLowerCase())]), Math.max(0, Math.ceil(want * 0.7) - queries.length), g.city, g.state));
       if (queries.length < want) {
         log('search', `Planning ${want - queries.length} new searches so this run finds new ${T.many}…`);
         try {
@@ -220,11 +225,27 @@ async function runWorker() {
 
     // ---------------- 2+3. search + extract (in small batches, saved as we go)
     let replans = 0;
+    let zeroStreak = 0; // searches in a row that found nothing
+    let searchesDone = 0;
+    let searchesWithResults = 0;
+    let fallbacks = 0;
+    const zeroPage1 = new Set<string>();
+    const g2 = targetGeo(startup.location);
+    const addCombos = (n: number) => {
+      const usedNow = new Set([...(loadState().usedQueries || []).map(u => u.toLowerCase()), ...c.queries.map(k => k.toLowerCase())]);
+      const more = comboQueries(audience, usedNow, n, g2.city, g2.state);
+      c.queries.splice(c.queryCursor, 0, ...more.map(q => `${q}|1`));
+      return more.length;
+    };
     while (c.phase === 'search' && alive()) {
       if (c.candidates.length >= Math.ceil(c.target * 1.3)) break;
       if (c.queryCursor >= c.queries.length) {
         if (replans >= 2) break;
         replans++;
+        if (addCombos(12)) {
+          log('search', `Found ${c.candidates.length} so far — added more simple searches.`, 'info');
+          continue;
+        }
         const used = loadState().usedQueries || [];
         try {
           const more = await generateSearchQueries(startup, settings, used.map(u => u.split('|')[0]), 15);
@@ -235,7 +256,9 @@ async function runWorker() {
           break;
         }
       }
-      const batch = c.queries.slice(c.queryCursor, c.queryCursor + 4);
+      // page 2 of a search whose page 1 found nothing is pointless
+      while (c.queryCursor < c.queries.length && /\|2$/.test(c.queries[c.queryCursor]) && zeroPage1.has(c.queries[c.queryCursor].replace(/\|2$/, ''))) c.queryCursor++;
+      const batch = c.queries.slice(c.queryCursor, c.queryCursor + 4).filter(k => !(/\|2$/.test(k) && zeroPage1.has(k.replace(/\|2$/, ''))));
       const results: SearchResult[] = [];
       for (const key of batch) {
         const i = key.lastIndexOf('|');
@@ -244,17 +267,33 @@ async function runWorker() {
         const { results: r, engine, errors } = await webSearch(q, 10, page);
         const s2 = loadState();
         s2.usedQueries = [...(s2.usedQueries || []), key].slice(-3000);
+        searchesDone++;
         if (r.length) {
+          searchesWithResults++;
+          zeroStreak = 0;
           results.push(...r);
           log('search', `${engine}: ${r.length} results — ${q}${page > 1 ? ` (page ${page})` : ''}`);
         } else {
           log('search', `No results — ${q}${errors.length ? ` (${errors.join('; ').slice(0, 120)})` : ''}`, 'warn');
+          zeroStreak++;
+          if (page === 1) zeroPage1.add(q);
           if (errors.some(e => /credits|quota|402|403|432/i.test(e)) && !errors.some(e => /duckduckgo: 0/.test(e))) {
             log('search', 'Search credits look used up — add another free search key or try again tomorrow.', 'warn');
           }
         }
       }
-      c.queryCursor += batch.length;
+      c.queryCursor += Math.max(1, c.queries.slice(c.queryCursor, c.queryCursor + 4).length);
+      // many empty searches in a row: the planned searches are too narrow — switch to simple ones
+      if (searchesDone >= 24 && searchesWithResults === 0) {
+        log('search', `${searchesDone} searches and not one result — stopping so no more search credits are used. Check your SERPER_API_KEY and credits at serper.dev (or add TAVILY_API_KEY), then start the run again.`, 'error');
+        break;
+      }
+      if (zeroStreak >= 8 && fallbacks < 2) {
+        fallbacks++;
+        const n = addCombos(16);
+        log('search', n ? `${zeroStreak} searches in a row found nothing — switching to ${n} simpler searches.` : `${zeroStreak} searches in a row found nothing. If this keeps happening, check your Serper key / credits at serper.dev.`, 'warn');
+        zeroStreak = 0;
+      }
       // de-duplicate result URLs inside this batch
       const seenUrl = new Set<string>();
       const uniq = results.filter(r => {

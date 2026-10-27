@@ -11,6 +11,7 @@
 import { chatJson } from './ai';
 import { Audience, audienceOf, expertQueries, EXPERT_TYPES, isNotFundraisingExpert } from '../src/data/audience';
 import { targetGeo, geoRule, withGeo, outsideTarget } from '../src/data/geo';
+import { simplifyQuery } from '../src/data/queries';
 import { TEMPLATE_V, buildEmails, buildLinkedIn } from '../src/data/emailTemplates';
 import { webSearch, SearchResult, isLinkedInProfile, normalizeLinkedInUrl } from './search';
 import { readPage, pickUsefulSubpages, canFetch, extractEmails, PageContent } from './reader';
@@ -181,7 +182,8 @@ Return JSON:
 export function defaultQueries(s: StartupProfile, settings?: Partial<AppSettings>): { linkedin: string[]; web: string[] } {
   const g = targetGeo(s.location);
   const q = rawDefaultQueries(s, settings);
-  return { linkedin: [...new Set(q.linkedin.map(x => withGeo(x, g)))], web: [...new Set(q.web.map(x => withGeo(x, g)))] };
+  const tidy = (x: string) => withGeo(simplifyQuery(x), g);
+  return { linkedin: [...new Set(q.linkedin.map(tidy))], web: [...new Set(q.web.map(tidy))] };
 }
 
 function rawDefaultQueries(s: StartupProfile, settings?: Partial<AppSettings>): { linkedin: string[]; web: string[] } {
@@ -1030,13 +1032,18 @@ Write ${count} NEW, varied Google queries that surface SPECIFIC investors who co
 - about a third that find PUBLIC LinkedIn profiles: must start with site:linkedin.com/in and use quoted phrases (roles like "angel investor", "partner", "principal", "scout"; themes; cities; portfolio companies like Greenlight, GoHenry, BusyKid, Step, Outschool)
 - about a third find funds, angel groups and accelerators that PUBLISH an email for pitches (e.g. "send us your pitch deck", "pitch@", "deals@", "email your deck") — these are the investors we can actually email
 - the rest find funds, angel groups, family offices, and "investors in <comparable company>" lists
+
+SEARCH RULES (very important — long searches find NOBODY):
+- Each query is SHORT: at most 2 quoted phrases, 2-7 words in total.
+- Never put fees, commission, success fee, retainer, compliance words (COPPA), "contact", "book a call" or "LinkedIn" in a query.
+- At most ONE place (a US state or city) per query.
 Return JSON: {"queries":["..."]}`,
     1500
   );
   const usedSet = new Set(used.map(q => q.toLowerCase().trim()));
   return arr(res?.queries, count * 2)
     .map(q => q.trim())
-    .map(q => withGeo(q, targetGeo(s.location)))
+    .map(q => withGeo(simplifyQuery(q), targetGeo(s.location)))
     .filter(q => q.length > 8 && !usedSet.has(q.toLowerCase()))
     .slice(0, count);
 }
@@ -1046,22 +1053,26 @@ async function generateExpertQueries(s: StartupProfile, settings: Partial<AppSet
     `You plan searches that find FUNDRAISING EXPERTS for ${s.name}. ${HONESTY_RULES}`,
     `STARTUP:\n${startupBrief(s).slice(0, 1500)}
 Geography: ONLY people based in the ${targetGeo(s.location).country}${targetGeo(s.location).state ? ` (extra weight on ${targetGeo(s.location).state})` : ''}. Every query must aim at the ${targetGeo(s.location).country} (name the country, a state or a city).
-Prefer experts who work on a success fee / commission (paid from money actually raised) — avoid ones selling retainers or paid programs.
 
 Queries ALREADY USED (do not repeat or lightly reword them):
 ${used.slice(-120).join('\n') || '(none)'}
 
 Write ${count} NEW, varied Google queries that surface SPECIFIC people or small firms who help startups like this raise money: fundraising consultants, fundraising advisors, capital-raising advisors and people who introduce startups to angel investors and VCs. NEVER lawyers / law firms, accountants, pitch-deck designers or agencies. Mix:
 - about a third that find PUBLIC LinkedIn profiles: must start with site:linkedin.com/in and use quoted phrases (roles + themes like consumer apps, fintech, edtech, kids, or cities)
-- about a third that find experts who publish a way to contact them (e.g. "book a call", "contact", "email us")
+- about a third that find experts with their own fundraising / capital-raising advisory website (e.g. "fundraising consultant" Phoenix, "capital raising advisory" startups)
 - the rest: lists and directories of such experts, and experts who mention helping companies similar to this one
+
+SEARCH RULES (very important — long searches find NOBODY):
+- Each query is SHORT: at most 2 quoted phrases, 2-7 words in total.
+- Never put fees, commission, success fee, retainer, compliance words (COPPA), "contact", "book a call" or "LinkedIn" in a query.
+- At most ONE place (a US state or city) per query.
 Return JSON: {"queries":["..."]}`,
     1500
   );
   const usedSet = new Set(used.map(q => q.toLowerCase().trim()));
   return arr(res?.queries, count * 2)
     .map(q => q.trim())
-    .map(q => withGeo(q, targetGeo(s.location)))
+    .map(q => withGeo(simplifyQuery(q), targetGeo(s.location)))
     .filter(q => q.length > 8 && !usedSet.has(q.toLowerCase()))
     .slice(0, count);
 }
