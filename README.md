@@ -1,199 +1,109 @@
-# SafeCart Kids — Investor Agent ($0)
+# SafeCart Kids — Fundraising Agent ($0)
 
-An autonomous agent that finds investors for **SafeCart Kids**. It:
+An agent that finds **investors** and **fundraising experts** for SafeCart Kids and emails them for you. It:
 
-1. **Understands the app.** It reads safecartkids.com plus the facts you enter, and writes its own search plan.
-2. **Searches** the web and **public LinkedIn profiles** (`site:linkedin.com/in "angel investor" "family tech"` …).
-3. **Picks real investors.** AI reads every result and keeps only named investors that fit, and it saves the source link for each one.
-4. **Researches** each investor: their website, portfolio, thesis and contact page, plus their public LinkedIn and any public email.
-5. **Scores** each investor's fit from 0-100 for SafeCart Kids, with reasons, concerns and the best opening hook.
-6. **Writes outreach**: a LinkedIn connection note and DM, plus a 4-email cadence (day 0 / 4 / 10 / 21).
-7. **Tracks** everything in a CRM pipeline and reminds you when follow-ups are due.
+1. **Understands the app.** It reads safecartkids.com plus the facts you enter in *Your App*.
+2. **Searches** the web and **public LinkedIn profiles** with short, simple searches, only in the USA (your business's country).
+3. **Picks real people.** AI reads every result and keeps only named investors or real fundraising experts. Law firms, accountants, agencies and anyone outside the USA are skipped.
+4. **Researches** the best ones: their website, contact page, portfolio or past clients, public email and phone, and **how they charge**. Anyone who wants money from you upfront is filtered out.
+5. **Scores** each person 0-100 with reasons, concerns and the best opening hook.
+6. **Writes the emails from your own text**, word for word, adding only the greeting, one sentence about the person and your booking link.
+7. **Sends them automatically** from your Gmail (email 1, then day 4 / 10 / 21), stops when someone replies, and tags every thread **Investor** or **Fundraising Expert** in Gmail.
+8. **Exports** everything to a Google Sheet with 3 tabs (Investors, Fundraising Experts, All).
 
-Nothing is installed on your computer, and nothing needs a credit card. You edit the code on GitHub and Railway runs it.
+Nothing is installed on your computer and nothing needs a credit card.
 
 ---
 
-## Deploy it (about 15 minutes, all in the browser)
-
-### Step 1 — Get free keys (no credit card)
+## 1. Free keys
 
 | What | Where | Needed? |
 |---|---|---|
-| **Gemini API key** (AI) | https://aistudio.google.com/apikey → *Create API key* | **Yes** (or Groq) |
+| **Gemini API key** (AI) | https://aistudio.google.com/apikey | **Yes** (or Groq) |
 | **Groq API key** (backup AI) | https://console.groq.com/keys | Recommended |
-| **Tavily API key** (search, 1,000/month free) | https://app.tavily.com | **Strongly recommended** |
-| Serper API key (Google results, 2,500 free) | https://serper.dev | Optional extra search |
-| Brevo API key (send emails from the app) | https://app.brevo.com → SMTP & API → API keys | Optional |
+| **Serper API key** (Google results, 2,500 free, one-time) | https://serper.dev | **Yes** (or Tavily) |
+| **Tavily API key** (1,000 free searches every month) | https://app.tavily.com | Recommended |
 
-Without a search key the agent falls back to DuckDuckGo. That needs no key, but it often blocks cloud servers, so add Tavily or Serper.
+## 2. Deploy
 
-### Step 2 — Put the code on GitHub
+### Railway
+1. https://railway.com → **New Project → Deploy from GitHub repo** → pick this repo.
+2. **Variables**: `APP_PASSWORD`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `SERPER_API_KEY`, `TAVILY_API_KEY`, `DATA_DIR=/data`, plus `GMAIL_SCRIPT_URL` and `GMAIL_SCRIPT_SECRET` (step 3).
+3. **Add Volume** with mount path **`/data`** (keeps your lists safe).
+4. **Settings → Networking → Generate Domain.** Build and start commands come from `railway.json`.
 
-1. Go to https://github.com/new, name the repo `safecart-investor-agent`, choose **Private**, and click **Create repository**.
-2. On the new repo page, click **uploading an existing file**.
-3. Unzip this project on your computer. Then drag **everything inside the folder** (`server`, `src`, `package.json`, `railway.json`, `index.html`, and the rest) into the upload box and click **Commit changes**.
-   - Hidden files such as `.gitignore` may not upload by drag-and-drop. That's fine.
+### Render (free) instead of Railway
+Render's free plan wipes the server's disk on every restart, so the agent keeps your data in **your Google Drive** (folder *SafeCart Agent Data*) through the Gmail script.
+- **New → Web Service** → connect GitHub → this repo → Language **Node**, Branch **main**.
+- Build: `npm install && npm run build` · Start: `npm start` · Instance: **Free** · Health Check Path: `/api/health`.
+- Environment: same keys as Railway **without `DATA_DIR`**, plus `DRIVE_BACKUP=1`.
+- Free Render apps sleep after 15 minutes without visits. On **cron-job.org**, open `https://<your-app>.onrender.com/api/health` every 10 minutes so auto-email keeps running.
+- Never run Railway and Render at the same time: both would send the same emails.
 
-### Step 3 — Deploy on Railway
+## 3. Gmail script (sending, reply detection, labels, Google Sheets, Drive backup)
 
-1. Go to https://railway.com, sign in with GitHub, then click **New Project → Deploy from GitHub repo** and pick `safecart-investor-agent`.
-2. Open the service, go to **Variables**, and add:
-   ```
-   APP_PASSWORD     = any long password you choose
-   GEMINI_API_KEY   = your Gemini key
-   GROQ_API_KEY     = your Groq key          (optional backup)
-   TAVILY_API_KEY   = your Tavily key
-   DATA_DIR         = /data
-   ```
-3. Right-click the service (or use the **+** / *Command palette*), choose **Add Volume**, and set the mount path to **`/data`**. This keeps your CRM safe across redeploys.
-   If your plan doesn't allow a volume, the app still works: your browser keeps a copy, and you can **Export CSV** at any time.
-4. Under **Settings → Networking**, click **Generate Domain**.
-5. Wait for the deploy to turn green, then open the domain and enter your `APP_PASSWORD`.
+1. Sign in to the Gmail you send from → **https://script.google.com** → **New project** → paste all of `google-apps-script/Code.gs`.
+2. On the `const SECRET = '…'` line, put your own password (letters and numbers). **Only there and in Railway/Render — never in the copy on GitHub.** Save.
+3. Choose **doGet** → **▶ Run** → **Review permissions** → **Advanced → Go to … (unsafe)** → **Allow**.
+4. **First time:** **Deploy → New deployment → ⚙ Web app** → Execute as **Me**, Who has access **Anyone** → **Deploy** → copy the Web app URL.
+   **Every later change:** **Deploy → Manage deployments → ✏ Edit → Version: New version → Deploy** (same URL). Saving the code alone does NOT change the live script.
+5. Put `GMAIL_SCRIPT_URL` (that URL) and `GMAIL_SCRIPT_SECRET` (the same password) in Railway/Render.
+6. Check it: in the app, **Settings → Test Gmail helper connection** should say *Connected — password correct, script up to date (v4)*. Opening the URL in a browser shows the live script's `version` and `passwordLength`.
 
-The build and start commands are already set in `railway.json` (`npm run build` and `npm start`).
+## 4. Settings to fill in once
 
----
+- **Automatic email:** tick it, minimum score 50, 20-25 emails a day, your **company postal address** (required by US law in cold emails).
+- **Calendar booking link:** in Google Calendar (as safecartkidsai@gmail.com) **Create → Appointment schedule** → 15 minutes → Save → open it → **Share** → copy the `https://calendar.app.google/…` link → paste it in Settings. Don't use `calendar.google.com/calendar/u/0/r`: that is your own calendar view, and nobody can book with it.
+- **LinkedIn:** keep email notifications on for "invitation accepted" so the agent can see who accepted.
 
-## Deploy on Render (free) instead of Railway
+## 5. Using it
 
-Render's free plan wipes the server's disk on every restart, so the agent keeps your data in **your Google Drive** (folder *SafeCart Agent Data*) through the Gmail helper script. It saves about a minute after each change and on shutdown, then copies the data back when the server starts. This switches on by itself on Render, or anywhere you set `DRIVE_BACKUP=1`.
+- **Looking for** dropdown (top): **Investors** or **Fundraising experts**. Each has its own list, and the number in brackets counts the people shown. "· N hidden" counts the ones filtered out (asks for money upfront, outside the USA, or not a real fundraising expert). They are not deleted, and **Show them** lists them with the reason.
+- **Find investors / Find experts:** start with 50. The run quick-scans everyone, then deep-researches the best (Settings → Deep research). It survives restarts, has Pause / Resume, and **Start next run** never repeats a search. If searches keep returning nothing, it switches to simpler searches, and after 24 empty searches it stops and tells you to check your search key.
+- **Research the ones I already have:** upgrades quick-scanned people and looks again for emails.
+- **Outreach tab:** automatic email status, recent activity (tagged Investor / Fundraising Expert), the daily LinkedIn list, and accepted invitations. Emails written before a template change are rebuilt in the background, so what you see is what gets sent.
+- **Open in Google Sheets** (Investors / Experts and Outreach tabs): one spreadsheet with 3 tabs and every detail (66 columns), saved in your Google Drive.
 
-- **New → Web Service** → connect GitHub → pick this repo → Language **Node**, Branch **main**
-- Build Command: `npm install && npm run build` · Start Command: `npm start` · Instance type: **Free**
-- Environment: the same keys as on Railway **except DATA_DIR**, plus `DRIVE_BACKUP=1`
-- Advanced → Health Check Path: `/api/health`
-- The free plan sleeps after 15 minutes without visits. Use a free pinger (cron-job.org) to open `https://<your-app>.onrender.com/api/health` every 10 minutes so auto-email keeps running. One app running all month fits in Render's 750 free hours.
-- Don't run Railway and Render at the same time: both would send emails and both would write the same Drive backup.
+## 6. The emails
 
-## Calendar booking page (for the link in investor emails)
+Your text, word for word, is in `src/data/emailTemplates.ts`: the investor email ("…the next $10 billion family-focused e-commerce company (the next Amazon)?"), and the fundraising-partnership email (5% success fee, no upfront fees, up to 0.5% equity). For each person the agent only adds the greeting ("Hi Lars,"), ONE sentence about them from their research (left out if nothing specific was found, never invented), and your booking link. To change the wording or the terms, edit that file.
 
-1. Sign in to Google Calendar as **safecartkidsai@gmail.com** → **Create** → **Appointment schedule**.
-2. Title "15-minute call with SafeCartKids", duration 15 minutes, set your available hours → **Next** → **Save**.
-3. Click the schedule in your calendar → **Share** (or **Open booking page**) → copy the link (`https://calendar.app.google/…`).
-4. In the app: **Settings → Calendar booking link** → paste → **Save**.
-Free Gmail accounts get one booking page, which is enough. Don't use `calendar.google.com/calendar/u/0/r`: that is your own calendar, and other people can't book with it.
+## Free-tier limits
 
-## The emails
+- **Serper:** 2,500 searches in total (one time). A 50-person run uses about 15-30. Check what's left at serper.dev.
+- **Groq free:** about 1,000 AI requests a day. If a limit is hit, the run waits and carries on.
+- **Gmail:** about 100 emails a day on a normal Gmail. Keep the daily limit at 20-25.
+- **LinkedIn (free):** about 100 connection requests a week. The app never logs in to LinkedIn; you click Send yourself.
+- **Railway:** the free plan gives $1 of credit a month after the trial. Use Render if it runs out.
 
-They are your own text, word for word (`src/data/emailTemplates.ts`). For each person the agent only adds the greeting ("Hi Lars,"), ONE sentence about them from the research (left out if nothing specific was found), and your booking link. Unsent emails written before a template change are rebuilt automatically before they go out.
+## Honesty guardrails
 
-## Checking the Gmail script
+- The AI never invents traction, people, emails or portfolio companies.
+- An email or phone number is only saved if it is published on that person's own website.
+- Every contact keeps its **source links**. Glance at them before sending anything by hand.
 
-- **Settings → Test Gmail helper connection** should say *Connected — password correct, script up to date (v4)*.
-- Opening your `GMAIL_SCRIPT_URL` in a browser shows `version` and `passwordLength` of the **live** script. If the version is missing or below 4, that link is running an old copy: in the script, **Deploy → Manage deployments → ✏ Edit → Version: New version → Deploy**, and make sure `GMAIL_SCRIPT_URL` is that deployment's Web app URL.
+## Test on your computer (optional)
 
-## Using it
-
-**Who it looks for:** only people based in your business's country (from the location in *Your App*: "Chandler, AZ" → United States, with a bonus for Arizona). Anyone who wants money from you **before** anything happens (retainers, application, pitch or membership fees) is filtered out of your lists and never emailed. The list tab shows how many were hidden and lets you look at them. Fundraising experts paid only from results (success fee) are preferred.
-
-**Emails** follow the two model emails in `src/data/emailTemplates.ts`: the investor email and the fundraising-expert email (5% success fee, no upfront fees, up to 0.5% equity). To change the terms, edit `EXPERT_TERMS` in that file.
-
-**Investors or fundraising experts?** Use the **Looking for** dropdown at the top. *Investors* finds people and funds who could invest. *Fundraising experts* finds people who can help you raise (fundraising consultants and advisors, pitch-deck and financial-model experts, fractional CFOs, startup lawyers, boutique bankers). Each has its own list, scores and emails, and you can switch any time. Settings (auto-email, limits) apply to both lists.
-
-1. **Your App tab:** check the facts, add the raise amount, real traction and the founder's name, then click **Analyse with AI**.
-2. Click **Find investors**, pick how many (50 / 100 / 150 / 200) and click **Start**.
-   - The agent quick-scans everyone it finds and adds them to your list straight away.
-   - It then deep-researches the best ones (score 50+, up to 40 per run — change this in Settings → Deep research).
-   - You can close the window: the run keeps going on the server, survives restarts, and has **Pause / Resume**.
-   - Click **Start next run** any time: it never repeats a search it already did, so you get *new* investors.
-   - People marked **Quick scan** can be upgraded any time with **Research deeply**.
-3. **Scores tab:** see why each investor fits or doesn't.
-4. **Investors tab:** table or board view, statuses, follow-up dates and CSV export.
-5. **Outreach tab:**
-   - **Automatic email** (after the Gmail setup below): every deep-researched investor at or above your score gets email 1, then follow-ups on day 4 / 10 / 21, inside your daily limit. When they reply, their follow-ups stop by themselves. Pause any single investor with one click.
-   - **LinkedIn today:** your daily list of connection requests. Click *Open profile* (the note is copied for you), paste it into "Add a note", then *Mark request sent*.
-   - **Accepted:** when LinkedIn emails you "… accepted your invitation", the agent spots it and puts that investor here. Click *Open profile & copy message*, paste, send, *Mark messaged*.
-
-## Automatic email (Gmail script, $0, about 10 minutes)
-
-Railway's free plan blocks normal email, so a tiny free script inside your own Google account does the sending. Emails go out from your real Gmail and show in your Sent folder.
-
-1. Sign in to the Gmail account you want to send from. Open **https://script.google.com** → **New project**.
-2. Delete what's there, paste the whole of `google-apps-script/Code.gs`.
-3. At the top, change `CHANGE-ME-to-a-long-random-password` to your own long password. Click **Save**.
-4. **Deploy → New deployment →** gear icon → **Web app**. *Execute as:* **Me**. *Who has access:* **Anyone**. Click **Deploy**.
-5. Click **Authorize access**, pick your account → *Advanced* → *Go to project (unsafe)* → **Allow**. (It says "unsafe" only because you wrote the script yourself and Google hasn't reviewed it.)
-6. Copy the **Web app URL** (ends with `/exec`).
-7. In Railway → your service → **Variables**, add `GMAIL_SCRIPT_URL` = that URL and `GMAIL_SCRIPT_SECRET` = your password from step 3. Railway redeploys.
-8. In the app: **Settings → Automatic email** → tick it, set your minimum score (50), emails per day, and your **company postal address** (the law requires it in cold emails). Save.
-9. LinkedIn: in LinkedIn → Settings → Notifications, keep **email** notifications on for "Invitation accepted", so the agent can see who accepted.
-
-If you change the script later, use **Deploy → Manage deployments → Edit → New version** so the URL stays the same.
-
-### Updating the Gmail script (needed for Google Sheets and the Investor / Expert tags)
-
-1. Open your project on **https://script.google.com**, select all the code and delete it, then paste the new `google-apps-script/Code.gs`.
-2. Put **your own** SECRET back on the `const SECRET = '…'` line (the same one as in Railway). Click **Save**.
-3. Pick **doGet** in the function list and click **▶ Run** → **Review permissions** → your account → **Advanced** → **Go to … (unsafe)** → **Allow**. Google asks again because the script can now create Google Sheets.
-4. **Deploy → Manage deployments → ✏ Edit → Version: New version → Deploy.** The URL stays the same, so nothing changes in Railway.
-
-What it adds:
-- **Open in Google Sheets** (Investors / Experts tab and Outreach tab) creates a Google Sheet of the list in your Google Drive and opens it. Use **File → Download** in Sheets if you need an Excel file.
-- Every email the agent sends gets a Gmail label, **Investor** or **Fundraising Expert**. Replies stay in the same thread, so they carry the label too, and the agent also labels any reply it finds.
-
-### About LinkedIn
-
-LinkedIn has no free API for searching people, and logging in with bots gets accounts banned. So the agent finds **public** profiles through search engines (the same results you'd see on Google), and you send the note yourself with one click. Your LinkedIn account is never touched.
-
-### Honesty guardrails
-
-- The AI is told never to invent traction, metrics, investors, emails or portfolio companies.
-- An email is only saved if it was actually published on that investor's own website.
-- Every investor keeps its **source links** in the dossier, under *Sources & website data*. Glance at them before you send anything.
-
----
-
-## Free-tier limits (so nothing surprises you)
-
-- **Gemini free tier:** limited requests per minute and per day. The agent automatically falls back to Groq (and OpenRouter or Hugging Face if you add those keys). On Google's free tier, prompts may be used to improve Google's products, so don't paste confidential data into the "Anything else" box.
-- **Serper:** 2,500 free searches (one time). A 100-investor run uses about 25-40 searches. Tavily: 1,000/month.
-- **Groq free:** about 1,000 AI requests a day. A 100-investor run uses about 60-90 (quick scans are 10 per request; each deep research is 1-2). If a limit is hit, the run waits and carries on.
-- **Gmail:** about 100 emails a day on a normal Gmail (1,500 on Google Workspace). Start with 20-25 a day so your address stays trusted.
-- **LinkedIn (free account):** about 100 connection requests a week, and only a few personalised notes a month. Keep "LinkedIn requests per day" around 15-20. The app never logs in to LinkedIn for you — automation tools that do get accounts restricted.
-- **Railway Free plan:** small CPU and RAM, which is plenty for this app. Railway blocks SMTP on free plans, so email sending uses Brevo's HTTPS API or your own Gmail.
-
-## Later: other apps
-
-Everything is app-agnostic. To use it for another app, change the profile in Tab 1 (name, website, facts) and click **Analyse with AI**. Proper multi-app workspaces and APK and screenshot intake are the next phases.
+Node.js 20+ → `npm install` → copy `.env.example` to `.env` and fill in your keys → `npm run local` → open http://localhost:8080.
 
 ## Project layout
 
 ```
 server/            Node backend, zero runtime dependencies
-  index.ts         HTTP server + API routes + serves the built frontend
-  ai.ts            Gemini / Groq / OpenRouter / HF client with automatic fallback
-  search.ts        Tavily / Serper / DuckDuckGo search (incl. public LinkedIn profiles)
-  reader.ts        Website reader (+ free Jina Reader fallback)
-  agent.ts         The agent: analyse → discover → research → score → outreach
-  store.ts         JSON-file CRM database (DATA_DIR)
-  email.ts         Sends through the Gmail helper (or Brevo as a backup)
-  gmail.ts         Talks to the Gmail helper script
-  campaign.ts      Big runs (100-200 investors), resumable, never repeats searches
-  automation.ts    Auto-email + follow-ups + reply / LinkedIn-accepted detection
-google-apps-script/Code.gs   The free Gmail helper you paste into script.google.com
-src/               React frontend (your original UI, now wired to the real backend)
+  index.ts         HTTP server, API routes, Google Sheet export, serves the app
+  ai.ts            Gemini / Groq / OpenRouter / HF with automatic fallback and waiting on free limits
+  search.ts        Tavily / Serper / DuckDuckGo search
+  reader.ts        Website reader (emails, phones, contact pages)
+  agent.ts         Find → research → score → write emails
+  campaign.ts      Big runs, resumable, never repeats searches
+  automation.ts    Auto-email, follow-ups, replies, LinkedIn accepts
+  store.ts         Data file (+ Google Drive backup on Render)
+  gmail.ts         Talks to the Gmail script
+src/data/
+  emailTemplates.ts  Your two emails and follow-ups
+  audience.ts        Investors vs fundraising experts
+  filters.ts         Who is hidden and never emailed
+  geo.ts             USA-only rules
+  queries.ts         Keeps searches short so they find people
+google-apps-script/Code.gs   The Gmail script you paste into script.google.com
 ```
-
-## Test on your computer in VS Code (before deploying)
-
-You need **Node.js 20 or newer** (free): https://nodejs.org → download **LTS** → install. Then restart VS Code.
-
-1. Unzip the project. In VS Code, use **File → Open Folder** and pick `safecart-investor-agent`.
-2. Open a terminal with **Terminal → New Terminal**, then run:
-   ```
-   npm install
-   ```
-3. Copy `.env.example` to a new file called **`.env`** in the same folder. Fill in at least `GEMINI_API_KEY` (and ideally `TAVILY_API_KEY`). `.env` is git-ignored, so your keys never go to GitHub.
-4. Build and start it, exactly as Railway will:
-   ```
-   npm run local
-   ```
-   Open **http://localhost:8080** in your browser. Stop the server with `Ctrl + C`.
-
-**Hot-reload mode (for editing code):** use two terminals.
-```
-npm run dev:server     # terminal 1 – backend on :8080
-npm run dev            # terminal 2 – UI on http://localhost:3000 (auto-refreshes on save)
-```
-Local data is saved in the `data/` folder (git-ignored).

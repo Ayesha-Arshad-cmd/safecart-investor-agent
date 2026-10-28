@@ -9,7 +9,7 @@
  *   runAgentJob                  → does all of it in one click, with a live log
  */
 import { chatJson } from './ai';
-import { Audience, audienceOf, expertQueries, EXPERT_TYPES, isNotFundraisingExpert } from '../src/data/audience';
+import { Audience, audienceOf, expertQueries, EXPERT_TYPES, isNotFundraisingExpert, looksLikeFundraiser } from '../src/data/audience';
 import { targetGeo, geoRule, withGeo, outsideTarget } from '../src/data/geo';
 import { simplifyQuery } from '../src/data/queries';
 import { TEMPLATE_V, buildEmails, buildLinkedIn } from '../src/data/emailTemplates';
@@ -669,9 +669,14 @@ Scoring guide: 80+ = clearly helps early-stage consumer startups raise, with evi
 
   const p = out?.profile || {};
   const fit = normalizeFit(out?.fit);
+  const pEarly = out?.profile || {};
+  const realFundraiser = exp && looksLikeFundraiser({ title: str(pEarly.title, 120) || c.title, firm: str(pEarly.firm, 120) || c.firm, thesis: str(pEarly.thesis, 800), feeModel: str(pEarly.feeModel, 160) });
   if (out?.isRealInvestor === false) {
-    fit.total = Math.min(fit.total, 30);
-    fit.status = 'cold';
+    // a clear fundraiser keeps their score (just a warning); otherwise the score drops
+    if (!realFundraiser) {
+      fit.total = Math.min(fit.total, 30);
+      fit.status = 'cold';
+    }
     fit.hesitations = [
       exp ? 'Evidence suggests they may not really offer fundraising help — verify before contacting.' : 'Evidence suggests this may not be an active investor — verify before contacting.',
       ...fit.hesitations
@@ -688,7 +693,9 @@ Scoring guide: 80+ = clearly helps early-stage consumer startups raise, with evi
   }
   const upfrontFee: 'yes' | 'no' | 'unknown' = /^yes/i.test(str(p.upfrontFee)) ? 'yes' : /^no/i.test(str(p.upfrontFee)) ? 'no' : 'unknown';
   const feeModel = str(p.feeModel, 160);
-  const notExpert = exp && (out?.isRealInvestor === false || isNotFundraisingExpert({ name: c.name, firm: str(p.firm, 120) || c.firm, title: str(p.title, 120) || c.title, investorType: str(p.investorType) }));
+  const who2 = { name: c.name, firm: str(p.firm, 120) || c.firm, title: str(p.title, 120) || c.title, investorType: str(p.investorType), thesis: str(p.thesis, 800), feeModel: str(p.feeModel, 160) };
+  // lawyers / vendors are always out; an AI "no" alone only counts if nothing says they raise money
+  const notExpert = exp && (isNotFundraisingExpert(who2) || (out?.isRealInvestor === false && !looksLikeFundraiser(who2)));
   if (notExpert) {
     fit.total = Math.min(fit.total, 10);
     fit.status = 'cold';
@@ -813,7 +820,8 @@ Be strict when information is thin.`,
 export async function generateOutreach(
   s: StartupProfile,
   i: Investor,
-  settings?: Partial<AppSettings>
+  settings?: Partial<AppSettings>,
+  opts: { requireAI?: boolean } = {}
 ): Promise<{ sequences: EmailSequenceStep[]; linkedinNote: string; linkedinMessage: string; templateV: number }> {
   const audience = audienceOf(i);
   let personal = '';
@@ -824,7 +832,8 @@ export async function generateOutreach(
       400
     );
     personal = str(out?.personalLine, 400);
-  } catch {
+  } catch (e) {
+    if (opts.requireAI) throw e; // background upgrade: wait for the AI rather than drop the personal sentence
     personal = ''; // the template still works without the personal sentence
   }
   const li = buildLinkedIn(audience, { name: i.name, firm: i.firm }, settings?.bookingLink);

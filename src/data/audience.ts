@@ -63,12 +63,23 @@ const EXPERT_ROLES = [
   'fundraising partner'
 ];
 
-/** Lawyers, accountants, agencies… are NOT fundraising experts — never kept, never emailed. */
+/** Lawyers / law firms: never fundraising experts here, whatever their title says. */
+const LAWYER = /\b(attorneys?|lawyers?|law (firm|group|office|offices|partners)|llp|esq\.?|paralegal)\b/i;
+/** Other vendors: excluded unless their title clearly says they raise money. */
 export const NOT_FUNDRAISING_EXPERT =
-  /\b(attorneys?|lawyers?|law (firm|group|office|offices)|legal|llp|esq\.?|counsel|paralegal|cpa|accountants?|accounting|bookkeep\w*|tax (advisor|services)|marketing agency|digital agency|seo|web design|graphic design|pitch deck design\w*|deck designer|presentation design\w*|software|saas|crm|recruit\w*|staffing|insurance|real estate|realtor|mortgage)\b/i;
+  /\b(legal|counsel|cpa|accountants?|accounting|bookkeep\w*|tax (advisor|services)|marketing agency|digital agency|seo|web design|graphic design|pitch deck design\w*|deck designer|presentation design\w*|recruit\w*|staffing|insurance|realtor|mortgage)\b/i;
+/** Words that show someone's job is raising money for startups. */
+export const FUNDRAISING_WORDS = /\b(fundrais\w*|capital[- ]rais\w*|raise[sd]? capital|raising capital|investor relations|investor introductions?|angel investors?|venture capital|pre-seed|seed round|series a)\b/i;
 
 export function isNotFundraisingExpert(x: { name?: string; firm?: string; title?: string; investorType?: string }): boolean {
-  return x.investorType === 'Startup Lawyer' || NOT_FUNDRAISING_EXPERT.test(`${x.title || ''} ${x.firm || ''} ${x.name || ''}`);
+  const text = `${x.title || ''} ${x.firm || ''} ${x.name || ''}`;
+  if (x.investorType === 'Startup Lawyer' || LAWYER.test(text)) return true;
+  return NOT_FUNDRAISING_EXPERT.test(text) && !FUNDRAISING_WORDS.test(`${x.title || ''} ${x.firm || ''}`);
+}
+
+/** Does what we know about them show they raise money for startups? (protects good experts from an over-strict AI "no") */
+export function looksLikeFundraiser(x: { title?: string; firm?: string; thesis?: string; feeModel?: string; researchNotes?: string }): boolean {
+  return FUNDRAISING_WORDS.test(`${x.title || ''} ${x.firm || ''} ${x.thesis || ''} ${x.feeModel || ''}`);
 }
 
 /** Search plan for fundraising experts. kw = themes from "Your App" (e.g. kids fintech), city = your city. */

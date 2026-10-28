@@ -19,6 +19,8 @@ interface HeaderProps {
   audience: Audience;
   onChangeAudience: (a: Audience) => void;
   audienceCounts: Record<Audience, number>;
+  /** people hidden by the filters (upfront fees, outside the USA, not real experts) */
+  hiddenCounts?: Record<Audience, number>;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -34,8 +36,10 @@ export const Header: React.FC<HeaderProps> = ({
   dueCount,
   audience,
   onChangeAudience,
-  audienceCounts
+  audienceCounts,
+  hiddenCounts
 }) => {
+  const hid = (a: Audience) => (hiddenCounts?.[a] ? ` · ${hiddenCounts[a]} hidden` : '');
   const T = textFor(audience);
   const tab = (id: TabId, icon: React.ReactNode, label: string, badge?: React.ReactNode) => (
     <button
@@ -71,8 +75,8 @@ export const Header: React.FC<HeaderProps> = ({
                 onChange={e => onChangeAudience(e.target.value as Audience)}
                 className="max-w-[11rem] sm:max-w-none bg-emerald-50 border border-emerald-300 text-emerald-900 text-sm font-semibold rounded-lg pl-2.5 pr-7 py-1.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-300"
               >
-                <option value="investors">Investors ({audienceCounts.investors})</option>
-                <option value="experts">Fundraising experts ({audienceCounts.experts})</option>
+                <option value="investors">Investors ({audienceCounts.investors}{hid('investors')})</option>
+                <option value="experts">Fundraising experts ({audienceCounts.experts}{hid('experts')})</option>
               </select>
             </label>
           </div>

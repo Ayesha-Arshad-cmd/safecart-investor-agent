@@ -238,6 +238,45 @@ function tick(forceCheck = false): Promise<void> {
   return current;
 }
 
+/**
+ * Emails written before the current template are rebuilt in the background (a few per check), so the
+ * Outreach tab — and anything you send by hand — always shows the current wording. Sent emails stay as they were.
+ */
+async function upgradeOldEmails(max = Number(process.env.TEMPLATE_UPGRADE_PER_TICK || 8)) {
+  const st = loadState();
+  const geo = targetGeo(st.startup?.location);
+  const todo = st.investors
+    .filter(
+      (i: Investor) =>
+        i.researchDepth !== 'quick' &&
+        i.outreach?.sequences?.length &&
+        (i.outreach.templateV || 1) < TEMPLATE_V &&
+        !CLOSED.includes(i.outreach.status) &&
+        !excludedReason(i, geo) &&
+        (i.outreach.sentStepsCount || 0) < i.outreach.sequences.length
+    )
+    .slice(0, max);
+  for (const inv of todo) {
+    try {
+      const o = await generateOutreach(st.startup, inv, st.settings, { requireAI: true });
+      if (!o.sequences.length) continue;
+      updateInvestor(inv.id, i => ({
+        ...i,
+        linkedinNote: o.linkedinNote || i.linkedinNote,
+        linkedinMessage: o.linkedinMessage || i.linkedinMessage,
+        outreach: {
+          ...i.outreach,
+          sequences: o.sequences.map((ns, k) => (i.outreach.sequences[k]?.sentAt ? i.outreach.sequences[k] : ns)),
+          sequenceGenerated: true,
+          templateV: o.templateV
+        }
+      }));
+    } catch {
+      break; // AI busy — try again next check
+    }
+  }
+}
+
 async function doTick(forceCheck: boolean) {
   if (running) return;
   running = true;
@@ -252,6 +291,7 @@ async function doTick(forceCheck: boolean) {
     // wrong password / old script: every email would fail the same way — say it once, send nothing
     if (setupProblem) note('error', `Paused sending and reply checks until this is fixed: ${setupProblem}`);
     else await sendDue();
+    await upgradeOldEmails();
     a.lastRunAt = new Date().toISOString();
     if (!forceCheck) a.lastError = a.lastError && /Inbox check failed/.test(a.lastError) ? a.lastError : undefined;
   } catch (e: any) {

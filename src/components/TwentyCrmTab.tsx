@@ -32,6 +32,7 @@ interface TwentyCrmTabProps {
   showToast?: (msg: string, error?: boolean) => void;
   /** contacts hidden because they ask for money upfront */
   hiddenCount?: number;
+  hiddenReasons?: Record<string, number>;
   showHidden?: boolean;
   onToggleHidden?: () => void;
 }
@@ -48,6 +49,7 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
   audience = 'investors',
   showToast = (m: string) => alert(m),
   hiddenCount = 0,
+  hiddenReasons = {},
   showHidden = false,
   onToggleHidden
 }) => {
@@ -224,7 +226,10 @@ export const TwentyCrmTab: React.FC<TwentyCrmTabProps> = ({
           <span>
             {showHidden
               ? `Showing ${hiddenCount} filtered-out ${T.many} (normally hidden — they are never emailed).`
-              : `${hiddenCount} filtered out: they ask for money upfront, are outside the USA${audience === 'experts' ? ', or are not real fundraising experts (law firms, accountants, agencies…)' : ''}. They are never emailed.`}
+              : `${hiddenCount} hidden (not deleted) — ${Object.entries(hiddenReasons)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([r, n]) => `${n} ${r}`)
+                  .join(' · ')}. They are never emailed.`}
           </span>
           {onToggleHidden && (
             <button onClick={onToggleHidden} className="underline font-medium cursor-pointer">

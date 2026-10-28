@@ -24,6 +24,7 @@ import {
 import { loadState, saveState, mergeInvestors } from './store';
 import { audienceOf, AUDIENCE_TEXT, isNotFundraisingExpert } from '../src/data/audience';
 import { comboQueries } from '../src/data/queries';
+import { excludedReason } from '../src/data/filters';
 import { targetGeo } from '../src/data/geo';
 import type { Campaign, CampaignCandidate, StartupProfile, AppSettings, PipelineExecutionLog, Investor } from '../src/types';
 
@@ -103,7 +104,9 @@ export function startUpgrade(startup: StartupProfile, settings: AppSettings, cou
   if (cur && cur.status === 'running' && worker) return { campaign: cur, available: 0 };
   const byScore = (a: Investor, b: Investor) => (b.fitScore?.total || 0) - (a.fitScore?.total || 0);
   const audience = audienceOf(settings);
-  const mine = st.investors.filter((i: Investor) => audienceOf(i) === audience);
+  // hidden people (upfront fees, outside the USA, not real experts) are not researched again
+  const geoU = targetGeo(startup.location);
+  const mine = st.investors.filter((i: Investor) => audienceOf(i) === audience && !excludedReason(i, geoU));
   const quick = mine.filter((i: Investor) => i.researchDepth === 'quick' && !['passed'].includes(i.outreach?.status)).sort(byScore);
   const recheck = mine
     .filter((i: Investor) => i.researchDepth !== 'quick' && !i.email && (i.emailSearchV || 0) < EMAIL_SEARCH_V && !['replied', 'meeting', 'diligence', 'passed'].includes(i.outreach?.status))
@@ -440,10 +443,10 @@ async function runWorker() {
             cand.hasEmail = !!inv.email;
             log(
               'score',
-              inv.upfrontFee === 'yes'
-                ? `Asks for money upfront${inv.feeModel ? ` (${inv.feeModel})` : ''} — filtered out of your list`
+              excludedReason(inv, g2)
+                ? `Hidden from your list (not deleted): ${excludedReason(inv, g2)}${inv.upfrontFee === 'yes' && inv.feeModel ? ` (${inv.feeModel})` : ''}`
                 : `Fit ${inv.fitScore.total}/100 (${inv.fitScore.status.toUpperCase()})${inv.email ? ' · email found' : ''}${inv.phone ? ' · phone found' : ''}`,
-              inv.upfrontFee === 'yes' ? 'warn' : 'success',
+              excludedReason(inv, g2) ? 'warn' : 'success',
               cand.name
             );
             (cand as any).hasPhone = !!inv.phone;

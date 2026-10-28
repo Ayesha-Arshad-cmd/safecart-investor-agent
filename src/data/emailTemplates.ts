@@ -123,7 +123,11 @@ const NOT_A_PERSON = /\b(capital|ventures?|partners|fund|group|angels?|llc|inc|a
 
 /** "Hi Lars," — or "Hello," when we only know a company name. */
 export function greetingFor(name: string, firm?: string): string {
-  const n = (name || '').trim();
+  // "Dr. John Smith, CFA" → John
+  const n = (name || '')
+    .replace(/[,|(–—-].*$/, '')
+    .replace(/^(dr|mr|mrs|ms|miss|prof|professor|sir)\.?\s+/i, '')
+    .trim();
   const parts = n.split(/\s+/).filter(Boolean);
   const looksLikePerson = parts.length >= 2 && parts.length <= 4 && !NOT_A_PERSON.test(n) && n.toLowerCase() !== (firm || '').trim().toLowerCase();
   if (!looksLikePerson) return 'Hello,';

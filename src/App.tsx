@@ -172,6 +172,16 @@ export default function App() {
   const asksUpfront = (i: Investor) => !!excludedReason(i, geo);
   const inList = investors.filter(i => audienceOf(i) === audience);
   const hiddenUpfront = inList.filter(asksUpfront).length;
+  // why people are hidden, e.g. { "asks for money upfront": 3, "outside the United States": 2 }
+  const hiddenReasons: Record<string, number> = {};
+  for (const i of inList) {
+    const r = excludedReason(i, geo);
+    if (r) hiddenReasons[r] = (hiddenReasons[r] || 0) + 1;
+  }
+  const hiddenCounts: Record<Audience, number> = {
+    investors: investors.filter(i => audienceOf(i) === 'investors' && asksUpfront(i)).length,
+    experts: investors.filter(i => audienceOf(i) === 'experts' && asksUpfront(i)).length
+  };
   const visible = showUpfront ? inList : inList.filter(i => !asksUpfront(i));
   const audienceCounts: Record<Audience, number> = {
     investors: investors.filter(i => audienceOf(i) === 'investors' && !asksUpfront(i)).length,
@@ -309,6 +319,7 @@ export default function App() {
         audience={audience}
         onChangeAudience={changeAudience}
         audienceCounts={audienceCounts}
+        hiddenCounts={hiddenCounts}
       />
 
       {serverReachable === false && (
@@ -343,6 +354,7 @@ export default function App() {
             audience={audience}
             showToast={showToast}
             hiddenCount={hiddenUpfront}
+            hiddenReasons={hiddenReasons}
             showHidden={showUpfront}
             onToggleHidden={() => setShowUpfront(v => !v)}
           />
