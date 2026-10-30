@@ -26,7 +26,7 @@
 
 const SECRET = 'CHANGE-ME-to-a-long-random-password';
 
-const VERSION = 4;
+const VERSION = 5;
 
 /** Open the Web app URL in a browser to check what is live: version + how many characters the password has. */
 function doGet() {
@@ -165,6 +165,11 @@ function safeName_(name) {
 /** Saves the agent's data file; also keeps one copy per day for the last 7 days. */
 function saveData_(req) {
   if (typeof req.content !== 'string' || !req.content) return { ok: false, error: 'Nothing to save' };
+  if (req.encoding === 'gzip-base64') {
+    // the agent sends the backup compressed (smaller upload); store it as plain JSON
+    req.content = Utilities.ungzip(Utilities.newBlob(Utilities.base64Decode(req.content), 'application/x-gzip')).getDataAsString();
+    try { JSON.parse(req.content); } catch (err) { return { ok: false, error: 'Backup arrived damaged' }; }
+  }
   const folder = dataFolder_();
   const name = safeName_(req.name);
   const it = folder.getFilesByName(name);

@@ -8,6 +8,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { aiConfigured, aiProviderNames } from './ai';
 import { searchProviderNames, webSearch } from './search';
 import { emailProvider, sendEmail } from './email';
@@ -51,11 +52,21 @@ const MIME: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8'
 };
 
-function send(res: http.ServerResponse, status: number, data: unknown) {
+const wantsGzip = (req?: http.IncomingMessage) => /\bgzip\b/.test(String(req?.headers['accept-encoding'] || ''));
+
+/** JSON reply — compressed when the browser accepts it (Render's free plan counts every byte sent). */
+function send(res: http.ServerResponse, status: number, data: unknown, req?: http.IncomingMessage) {
   const body = JSON.stringify(data);
+  if (body.length > 1024 && wantsGzip(req)) {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+    res.end(zlib.gzipSync(body));
+    return;
+  }
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(body);
 }
+
+const gzCache = new Map<string, Buffer>();
 
 async function readBody(req: http.IncomingMessage, limit = 8 * 1024 * 1024): Promise<any> {
   const chunks: Buffer[] = [];
@@ -96,6 +107,16 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse) {
   }
   const ext = path.extname(file).toLowerCase();
   const cache = /\/assets\//.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache';
+  if (/\.(js|css|html|svg|json|txt|map)$/.test(ext) && wantsGzip(req)) {
+    let gz = gzCache.get(file);
+    if (!gz) {
+      gz = zlib.gzipSync(fs.readFileSync(file), { level: 9 });
+      gzCache.set(file, gz);
+    }
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+    res.end(gz);
+    return;
+  }
   res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache });
   fs.createReadStream(file).pipe(res);
 }
@@ -122,8 +143,20 @@ route('GET', '/api/health', (): HealthInfo => ({
   passwordRequired: Boolean(PASSWORD)
 }));
 
-route('GET', '/api/state', () => {
+route('GET', '/api/state', body => {
   const s = loadState();
+  // ?since=<updatedAt the browser already has> → only what changed (usually nothing), to save bandwidth
+  if (body.since) {
+    if (body.since === s.updatedAt) return { unchanged: true, updatedAt: s.updatedAt };
+    const cutoff = (Date.parse(body.since) || 0) - 5 * 60_000; // 5 min slack for clock differences
+    return {
+      startup: s.startup,
+      settings: s.settings,
+      updatedAt: s.updatedAt,
+      changed: s.investors.filter((i: any) => (Date.parse(i.updatedAt || i.createdAt) || 0) >= cutoff),
+      ids: s.investors.map((i: any) => i.id)
+    };
+  }
   return { startup: s.startup, investors: s.investors, settings: s.settings, updatedAt: s.updatedAt };
 });
 route('PUT', '/api/state', body => {
@@ -363,13 +396,14 @@ const server = http.createServer(async (req, res) => {
   try {
     const m = url.match(r.pattern)!;
     const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
-    const body = req.method === 'GET' ? {} : await readBody(req);
+    // GET: the query string (?since=…) becomes the body
+    const body = req.method === 'GET' ? Object.fromEntries(new URLSearchParams((req.url || '').split('?')[1] || '')) : await readBody(req);
     const out = await r.handler(body, params);
-    send(res, 200, out);
+    send(res, 200, out, req);
   } catch (e: any) {
     const status = e?.status || 500;
     if (status >= 500) console.error(`[api] ${req.method} ${url}:`, e?.message);
-    send(res, status, { error: String(e?.message || e) });
+    send(res, status, { error: String(e?.message || e) }, req);
   }
 });
 

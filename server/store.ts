@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 /**
  * Tiny JSON-file database (the real "CRM" storage).
  * Set DATA_DIR to a Railway Volume mount path (e.g. /data) so data survives redeploys.
@@ -43,7 +44,8 @@ let writeTimer: NodeJS.Timeout | null = null;
 // changes and on shutdown, and copied back when the server starts with an empty disk.
 // On automatically on Render; anywhere else set DRIVE_BACKUP=1.
 const BACKUP_NAME = 'crm.json';
-const BACKUP_EVERY_MS = () => Number(process.env.DRIVE_BACKUP_EVERY_MS || 60_000);
+const BACKUP_EVERY_MS = () => Number(process.env.DRIVE_BACKUP_EVERY_MS || 600_000); // at most every 10 minutes
+let lastBackupHash = ''; // skip the upload when nothing changed (saves bandwidth on free hosts)
 let backupTimer: NodeJS.Timeout | null = null;
 let backupBlocked = false; // true while we could not read the existing backup — never overwrite it with less data
 let lastBackupAt = '';
@@ -93,6 +95,7 @@ async function readBackup(): Promise<'restored' | 'none' | 'kept-local'> {
   }
   // the disk survived (or the app already started): keep both, newest wins per investor
   mergeBackup(b);
+  lastBackupHash = contentHash(b);
   return 'kept-local';
 }
 
@@ -128,6 +131,15 @@ export async function restoreFromBackup(): Promise<void> {
   retry.unref();
 }
 
+/** Fingerprint of the data, ignoring timestamps that change on every automation check. */
+function contentHash(st: StoredState): string {
+  const auto = { ...(st.automation || {}) } as any;
+  delete auto.lastRunAt;
+  delete auto.lastCheckAt;
+  const { updatedAt: _u, ...rest } = st as any;
+  return crypto.createHash('sha1').update(JSON.stringify({ ...rest, automation: auto })).digest('hex');
+}
+
 async function backupNow(): Promise<void> {
   if (!backupEnabled() || backupBlocked || !cache) return;
   if (backupTimer) {
@@ -135,7 +147,11 @@ async function backupNow(): Promise<void> {
     backupTimer = null;
   }
   try {
-    await driveSave(BACKUP_NAME, JSON.stringify(cache));
+    const body = JSON.stringify(cache);
+    const hash = contentHash(cache);
+    if (hash === lastBackupHash) return; // nothing new since the last backup
+    await driveSave(BACKUP_NAME, body);
+    lastBackupHash = hash;
     lastBackupAt = new Date().toISOString();
     lastBackupError = '';
   } catch (e: any) {

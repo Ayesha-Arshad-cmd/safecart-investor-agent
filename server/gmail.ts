@@ -1,3 +1,4 @@
+import zlib from 'node:zlib';
 /**
  * Talks to the free Gmail helper script (google-apps-script/Code.gs) that runs in the founder's
  * own Google account. Railway's free plan blocks normal email (SMTP), but this goes over HTTPS
@@ -112,7 +113,8 @@ export async function gmailTest(): Promise<{ ok: boolean; message: string; versi
   try {
     const r = await call({ action: 'quota' }, 20000);
     const v = Number(r.version || 1);
-    if (v < 4)
+    scriptVersion = v;
+    if (v < 5)
       return { ok: false, version: v, message: `Connected and the password is right, but the script is an old version (v${v}). Paste the new Code.gs, put your SECRET back, Save, run doGet → Allow, then Deploy → Manage deployments → Edit → New version.` };
     return { ok: true, version: v, message: `Connected — password correct, script up to date (v${v}). Gmail can still send ${r.remaining} emails today.` };
   } catch (e: any) {
@@ -120,15 +122,29 @@ export async function gmailTest(): Promise<{ ok: boolean; message: string; versi
     if (/Wrong secret/i.test(msg))
       return {
         ok: false,
-        message: `Wrong secret. The password on this server has ${secret().length} characters. Open your GMAIL_SCRIPT_URL in a browser: it shows "passwordLength" and "version" of the LIVE script. If the version is missing or below 4, the link runs an old copy — deploy a New version (or put the newest deployment's URL in GMAIL_SCRIPT_URL). If the lengths differ, the passwords differ.`
+        message: `Wrong secret. The password on this server has ${secret().length} characters. Open your GMAIL_SCRIPT_URL in a browser: it shows "passwordLength" and "version" of the LIVE script. If the version is missing or below 5, the link runs an old copy — deploy a New version (or put the newest deployment's URL in GMAIL_SCRIPT_URL). If the lengths differ, the passwords differ.`
       };
     return { ok: false, message: msg };
   }
 }
 
 /** Save / load the agent's data file in Google Drive (folder "SafeCart Agent Data"). */
+let scriptVersion = 0; // learned once; v5+ accepts compressed backups
+
 export async function driveSave(name: string, content: string): Promise<void> {
   try {
+    if (!scriptVersion) {
+      try {
+        scriptVersion = Number((await call({ action: 'quota' }, 20000)).version || 1);
+      } catch {
+        scriptVersion = 0;
+      }
+    }
+    if (scriptVersion >= 5) {
+      // about 10x smaller upload: important on hosts that limit outgoing data (Render free: 5 GB a month)
+      await call({ action: 'saveData', name, encoding: 'gzip-base64', content: zlib.gzipSync(content, { level: 9 }).toString('base64') }, 120000);
+      return;
+    }
     await call({ action: 'saveData', name, content }, 120000);
   } catch (e: any) {
     if (/Unknown action/i.test(String(e?.message))) throw new Error('Gmail helper script is an old version — paste the new Code.gs and deploy a new version.');

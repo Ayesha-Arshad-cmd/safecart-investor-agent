@@ -62,6 +62,12 @@ export const api = {
   health: () => call<HealthInfo>('GET', '/api/health'),
 
   loadState: () => call<{ startup: StartupProfile | null; investors: Investor[]; settings: AppSettings | null; updatedAt: string }>('GET', '/api/state'),
+  /** Only what changed since `since` (usually nothing) — keeps Render's bandwidth use tiny. */
+  loadStateSince: (since: string) =>
+    call<{ unchanged?: boolean; updatedAt: string; changed?: Investor[]; ids?: string[]; investors?: Investor[] }>(
+      'GET',
+      `/api/state${since ? `?since=${encodeURIComponent(since)}` : ''}`
+    ),
   saveState: (state: { startup?: StartupProfile; investors?: Investor[]; settings?: AppSettings; deletedIds?: string[]; clearAll?: boolean }) =>
     call<{ ok: boolean }>('PUT', '/api/state', state),
 

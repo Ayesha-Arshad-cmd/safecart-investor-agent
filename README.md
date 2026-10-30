@@ -36,8 +36,9 @@ Nothing is installed on your computer and nothing needs a credit card.
 Render's free plan wipes the server's disk on every restart, so the agent keeps your data in **your Google Drive** (folder *SafeCart Agent Data*) through the Gmail script.
 - **New → Web Service** → connect GitHub → this repo → Language **Node**, Branch **main**.
 - Build: `npm install && npm run build` · Start: `npm start` · Instance: **Free** · Health Check Path: `/api/health`.
-- Environment: same keys as Railway **without `DATA_DIR`**, plus `DRIVE_BACKUP=1`.
+- Environment: same keys as Railway **without `DATA_DIR`** (`DRIVE_BACKUP=1` is optional: the backup turns on by itself on Render).
 - Free Render apps sleep after 15 minutes without visits. On **cron-job.org**, open `https://<your-app>.onrender.com/api/health` every 10 minutes so auto-email keeps running.
+- Render's free plan includes 5 GB of outgoing data a month. The agent stays far below it: pages and data are compressed, open pages only download what changed, and the Drive backup is compressed and only sent when something changed (at most every 10 minutes).
 - Never run Railway and Render at the same time: both would send the same emails.
 
 ## 3. Gmail script (sending, reply detection, labels, Google Sheets, Drive backup)
@@ -48,7 +49,7 @@ Render's free plan wipes the server's disk on every restart, so the agent keeps 
 4. **First time:** **Deploy → New deployment → ⚙ Web app** → Execute as **Me**, Who has access **Anyone** → **Deploy** → copy the Web app URL.
    **Every later change:** **Deploy → Manage deployments → ✏ Edit → Version: New version → Deploy** (same URL). Saving the code alone does NOT change the live script.
 5. Put `GMAIL_SCRIPT_URL` (that URL) and `GMAIL_SCRIPT_SECRET` (the same password) in Railway/Render.
-6. Check it: in the app, **Settings → Test Gmail helper connection** should say *Connected — password correct, script up to date (v4)*. Opening the URL in a browser shows the live script's `version` and `passwordLength`.
+6. Check it: in the app, **Settings → Test Gmail helper connection** should say *Connected — password correct, script up to date (v5)*. Opening the URL in a browser shows the live script's `version` and `passwordLength`.
 
 ## 4. Settings to fill in once
 
@@ -75,6 +76,7 @@ Your text, word for word, is in `src/data/emailTemplates.ts`: the investor email
 - **Gmail:** about 100 emails a day on a normal Gmail. Keep the daily limit at 20-25.
 - **LinkedIn (free):** about 100 connection requests a week. The app never logs in to LinkedIn; you click Send yourself.
 - **Railway:** the free plan gives $1 of credit a month after the trial. Use Render if it runs out.
+- **Render free:** sleeps after 15 idle minutes (the cron-job.org ping prevents it), 750 free hours a month (enough for ONE always-on app per account), 5 GB outgoing data a month, short restarts when Render updates its servers or you push to GitHub.
 
 ## Honesty guardrails
 

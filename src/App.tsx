@@ -41,6 +41,7 @@ export default function App() {
   const [needsPassword, setNeedsPassword] = useState(false);
   const [passwordInput, setPasswordInput] = useState(getPassword());
   const [loaded, setLoaded] = useState(false);
+  const serverStamp = useRef(''); // the server's updatedAt this browser already has
 
   const [activeTab, setActiveTab] = useState<TabId>('brain');
   const [isArchitectureModalOpen, setIsArchitectureModalOpen] = useState(false);
@@ -63,6 +64,7 @@ export default function App() {
       setHealth(h);
       setServerReachable(true);
       const state = await api.loadState();
+      serverStamp.current = state.updatedAt || '';
       setNeedsPassword(false);
       if (state.investors?.length) {
         setInvestors(state.investors);
@@ -133,8 +135,24 @@ export default function App() {
   // ---------- pull server-side changes (new investors from big runs, auto-emails, replies, LinkedIn accepts)
   const pullServer = useCallback(async () => {
     try {
-      const state = await api.loadState();
-      const server: Investor[] = state.investors || [];
+      const state = await api.loadStateSince(serverStamp.current);
+      if (state.unchanged) return; // nothing new — almost every time
+      let server: Investor[];
+      if (state.ids) {
+        // only the changed ones came back: rebuild the full list from what we already have
+        const changed = new Map((state.changed || []).map(i => [i.id, i]));
+        const have = new Map(investorsRef.current.map(i => [i.id, i]));
+        server = [];
+        for (const id of state.ids) {
+          const x = changed.get(id) || have.get(id);
+          if (x) server.push(x);
+          else if (!deletedIds.current.has(id)) {
+            serverStamp.current = ''; // something we don't have yet — fetch everything on the next check
+            return;
+          }
+        }
+      } else server = state.investors || [];
+      serverStamp.current = state.updatedAt;
       setInvestors(prev => {
         const local = new Map(prev.map(i => [i.id, i]));
         const out: Investor[] = [];
@@ -158,7 +176,10 @@ export default function App() {
 
   useEffect(() => {
     if (!loaded || needsPassword || serverReachable === false) return;
-    const t = window.setInterval(pullServer, 20000);
+    // only while the tab is visible — a background tab costs nothing
+    const t = window.setInterval(() => {
+      if (!document.hidden) pullServer();
+    }, 20000);
     return () => window.clearInterval(t);
   }, [loaded, needsPassword, serverReachable, pullServer]);
 
